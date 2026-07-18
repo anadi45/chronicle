@@ -100,8 +100,8 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [ ] Queue status page
 - [ ] Permission diagnostics page
 - [ ] Watched-folder and excluded-application editors
-- [ ] Wire export button to file-save dialog
-- [ ] Wire delete-all button with confirmation
+- [x] Wire export button to browser download
+- [x] Wire delete-all button with confirmation
 - [ ] Storage usage and model status indicators
 
 ## Hardening and release
