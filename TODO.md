@@ -61,6 +61,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [~] Implement create/modify/delete/rename notifications
 - [x] Add path exclusions
 - [x] Test case-insensitive path exclusions
+- [x] Preserve path exclusion compatibility for existing settings
 - [x] Add filesystem snapshot tests
 
 ## Screenshots and transient assets

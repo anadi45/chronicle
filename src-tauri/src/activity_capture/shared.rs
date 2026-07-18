@@ -264,4 +264,10 @@ mod tests {
         assert!(settings.excludes_path("C:\\Projects\\Secrets\\notes.txt"));
         assert!(!settings.excludes_path("C:\\Projects\\Public\\notes.txt"));
     }
+
+    #[test]
+    fn legacy_settings_default_path_exclusions_to_empty() {
+        let settings: CaptureSettings = serde_json::from_str(r#"{"enabled":true,"mouse_enabled":false,"keyboard_enabled":false,"keyboard_mode":"metadata_only","excluded_applications":[],"watched_folders":[],"screenshots_enabled":false}"#).unwrap();
+        assert!(settings.excluded_paths.is_empty());
+    }
 }
