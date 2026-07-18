@@ -60,6 +60,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [x] Add watched-folder selection
 - [~] Implement create/modify/delete/rename notifications
 - [x] Add path exclusions
+- [x] Test case-insensitive path exclusions
 - [x] Add filesystem snapshot tests
 
 ## Screenshots and transient assets

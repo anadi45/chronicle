@@ -257,4 +257,11 @@ mod tests {
         assert!(matches!(s.keyboard_mode, KeyboardMode::MetadataOnly));
         assert!(!s.screenshots_enabled);
     }
+
+    #[test]
+    fn path_exclusions_match_case_insensitive_fragments() {
+        let settings = CaptureSettings { excluded_paths: vec!["secrets".into()], ..Default::default() };
+        assert!(settings.excludes_path("C:\\Projects\\Secrets\\notes.txt"));
+        assert!(!settings.excludes_path("C:\\Projects\\Public\\notes.txt"));
+    }
 }
