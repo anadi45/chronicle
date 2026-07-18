@@ -57,6 +57,8 @@ impl Database {
         connection.pragma_update(None, "journal_mode", "WAL")?;
         connection.pragma_update(None, "foreign_keys", "ON")?;
         connection.execute_batch(include_str!("../migrations/001_initial.sql"))?;
+        // Keep existing installations compatible with the retry timestamp added after v1.
+        let _ = connection.execute("ALTER TABLE processing_queue ADD COLUMN retry_at TEXT", []);
         Ok(Self { connection })
     }
 
@@ -126,7 +128,7 @@ impl Database {
 
     pub fn claim_next_task(&self) -> Result<Option<QueueTask>> {
         let transaction = self.connection.unchecked_transaction()?;
-        let candidate = transaction.query_row("SELECT id, raw_event_id, task_type, attempts, priority FROM processing_queue WHERE status = 'pending' ORDER BY priority DESC, created_at ASC LIMIT 1", [], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, u32>(3)?, row.get::<_, i32>(4)?))).optional()?;
+        let candidate = transaction.query_row("SELECT id, raw_event_id, task_type, attempts, priority FROM processing_queue WHERE status = 'pending' AND (retry_at IS NULL OR retry_at <= datetime('now')) ORDER BY priority DESC, created_at ASC LIMIT 1", [], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, u32>(3)?, row.get::<_, i32>(4)?))).optional()?;
         let Some((id, raw_event_id, task_type, attempts, priority)) = candidate else {
             transaction.commit()?;
             return Ok(None);
@@ -153,8 +155,12 @@ impl Database {
         Ok(())
     }
     pub fn fail_task(&self, task_id: &str, error: &str, retry: bool) -> Result<()> {
-        let status = if retry { "pending" } else { "failed" };
-        self.connection.execute("UPDATE processing_queue SET status = ?1, error = ?, completed_at = CASE WHEN ?1 = 'failed' THEN datetime('now') ELSE NULL END WHERE id = ?3", params![status, error, task_id])?;
+        if retry {
+            let retry_seconds = 250u64.saturating_mul(2u64.saturating_pow(0)).max(250) / 1000;
+            self.connection.execute("UPDATE processing_queue SET status = 'pending', error = ?1, retry_at = datetime('now', '+' || ?2 || ' seconds'), completed_at = NULL WHERE id = ?3", params![error, retry_seconds.max(1), task_id])?;
+        } else {
+            self.connection.execute("UPDATE processing_queue SET status = 'failed', error = ?1, retry_at = NULL, completed_at = datetime('now') WHERE id = ?2", params![error, task_id])?;
+        }
         Ok(())
     }
 

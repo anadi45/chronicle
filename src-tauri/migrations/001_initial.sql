@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS processing_queue (
     model_name TEXT,
     model_version TEXT,
     error TEXT,
+    retry_at TEXT,
     created_at TEXT NOT NULL,
     started_at TEXT,
     completed_at TEXT
