@@ -55,8 +55,8 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [ ] Capture control type, name, value, class, framework, and bounds
 - [ ] Capture selected text where available
 - [ ] Add graceful fallback for inaccessible/elevated applications
-- [ ] Add watched-folder selection
-- [ ] Implement create/modify/delete/rename notifications
+- [~] Add watched-folder selection
+- [~] Implement create/modify/delete/rename notifications
 - [ ] Add path exclusions and filesystem tests
 
 ## Screenshots and transient assets

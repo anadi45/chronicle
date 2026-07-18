@@ -2,6 +2,7 @@
 mod activity_capture;
 #[allow(dead_code)]
 mod asynchronous_processing_queue;
+mod filesystem_activity_capture;
 #[allow(dead_code)]
 mod input_capture;
 mod local_sqlite_event_database;
@@ -33,7 +34,8 @@ pub fn run() {
             tauri_application_commands::stop_capture,
             tauri_application_commands::capture_status,
             tauri_application_commands::set_input_permission,
-            tauri_application_commands::set_excluded_applications
+            tauri_application_commands::set_excluded_applications,
+            tauri_application_commands::set_watched_folders
         ])
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {

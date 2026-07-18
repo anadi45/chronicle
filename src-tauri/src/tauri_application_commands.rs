@@ -149,16 +149,59 @@ pub fn set_input_permission(
 }
 
 #[tauri::command]
-pub fn set_excluded_applications(state: State<'_, AppState>, applications: Vec<String>) -> Result<CaptureSettings, String> {
-    let mut settings = state.settings.lock().map_err(|_| "settings lock poisoned".to_owned())?;
+pub fn set_excluded_applications(
+    state: State<'_, AppState>,
+    applications: Vec<String>,
+) -> Result<CaptureSettings, String> {
+    let mut settings = state
+        .settings
+        .lock()
+        .map_err(|_| "settings lock poisoned".to_owned())?;
     let mut normalized = Vec::new();
     for application in applications {
         let value = application.trim().to_ascii_lowercase();
-        if !value.is_empty() && !normalized.contains(&value) { normalized.push(value); }
+        if !value.is_empty() && !normalized.contains(&value) {
+            normalized.push(value);
+        }
     }
     settings.excluded_applications = normalized;
     let json = serde_json::to_string(&*settings).map_err(|error| error.to_string())?;
-    state.database.lock().map_err(|_| "database lock poisoned".to_owned())?.save_setting("capture", &json).map_err(|error| error.to_string())?;
+    state
+        .database
+        .lock()
+        .map_err(|_| "database lock poisoned".to_owned())?
+        .save_setting("capture", &json)
+        .map_err(|error| error.to_string())?;
+    Ok(settings.clone())
+}
+
+#[tauri::command]
+pub fn set_watched_folders(
+    state: State<'_, AppState>,
+    folders: Vec<String>,
+) -> Result<CaptureSettings, String> {
+    let mut settings = state
+        .settings
+        .lock()
+        .map_err(|_| "settings lock poisoned".to_owned())?;
+    let mut normalized = Vec::new();
+    for folder in folders {
+        let value = folder.trim().to_owned();
+        if !value.is_empty()
+            && std::path::Path::new(&value).is_dir()
+            && !normalized.contains(&value)
+        {
+            normalized.push(value);
+        }
+    }
+    settings.watched_folders = normalized;
+    let json = serde_json::to_string(&*settings).map_err(|error| error.to_string())?;
+    state
+        .database
+        .lock()
+        .map_err(|_| "database lock poisoned".to_owned())?
+        .save_setting("capture", &json)
+        .map_err(|error| error.to_string())?;
     Ok(settings.clone())
 }
 
@@ -203,6 +246,11 @@ pub fn start_capture(state: State<'_, AppState>) -> Result<(), String> {
         .lock()
         .map_err(|_| "capture thread lock poisoned".to_owned())?;
     threads.push(thread);
+    threads.push(crate::filesystem_activity_capture::start_filesystem_loop(
+        state.database.clone(),
+        stop.clone(),
+        state.settings.clone(),
+    ));
     #[cfg(windows)]
     if mouse_enabled {
         threads.push(crate::input_capture::windows::start_mouse_hook(
