@@ -81,6 +81,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [~] Add queue backlog/progress commands and UI
 - [ ] Add cancellation and backpressure
 - [x] Add cancellation for pending queue tasks
+- [x] Add bounded queue backpressure
 - [ ] Test capture while workers are busy
 
 ## Local AI and semantic events
