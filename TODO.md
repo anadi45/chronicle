@@ -35,7 +35,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 
 ## Input capture
 
-- [~] Add explicit keyboard permission/on-off flow
+- [x] Add explicit keyboard permission/on-off flow
 - [x] Implement metadata-only keyboard hook
 - [x] Add Windows low-level keyboard hook worker
 - [x] Add normalized keyboard/mouse event contracts and privacy metadata
@@ -44,7 +44,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [ ] Add protected-field/password/security exclusions
 - [x] Add protected-field/password/security exclusions for UI Automation
 - [ ] Add text batching and 500–1000 ms debounce
-- [~] Implement mouse click, double-click, right-click, scroll, and drag events
+- [x] Implement mouse click, double-click, right-click, scroll, and drag events
 - [x] Add isolated Windows low-level mouse hook worker
 - [x] Wire mouse hook into capture start/stop lifecycle
 - [x] Add Windows message pump and mouse click/double-click/scroll/drag state handling
