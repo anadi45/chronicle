@@ -124,6 +124,31 @@ pub fn update_capture_settings(
 }
 
 #[tauri::command]
+pub fn set_input_permission(
+    state: State<'_, AppState>,
+    input: String,
+    enabled: bool,
+) -> Result<CaptureSettings, String> {
+    let mut settings = state
+        .settings
+        .lock()
+        .map_err(|_| "settings lock poisoned".to_owned())?;
+    match input.as_str() {
+        "keyboard" => settings.keyboard_enabled = enabled,
+        "mouse" => settings.mouse_enabled = enabled,
+        _ => return Err("input must be keyboard or mouse".to_owned()),
+    }
+    let json = serde_json::to_string(&*settings).map_err(|error| error.to_string())?;
+    state
+        .database
+        .lock()
+        .map_err(|_| "database lock poisoned".to_owned())?
+        .save_setting("capture", &json)
+        .map_err(|error| error.to_string())?;
+    Ok(settings.clone())
+}
+
+#[tauri::command]
 pub fn export_data(state: State<'_, AppState>) -> Result<String, String> {
     state
         .database
@@ -148,6 +173,11 @@ pub fn start_capture(state: State<'_, AppState>) -> Result<(), String> {
         .lock()
         .map_err(|_| "settings lock poisoned".to_owned())?
         .keyboard_enabled;
+    let mouse_enabled = state
+        .settings
+        .lock()
+        .map_err(|_| "settings lock poisoned".to_owned())?
+        .mouse_enabled;
     let thread = crate::activity_capture::start_foreground_loop(
         state.database.clone(),
         stop.clone(),
@@ -160,10 +190,12 @@ pub fn start_capture(state: State<'_, AppState>) -> Result<(), String> {
         .map_err(|_| "capture thread lock poisoned".to_owned())?;
     threads.push(thread);
     #[cfg(windows)]
-    threads.push(crate::input_capture::windows::start_mouse_hook(
-        state.database.clone(),
-        stop.clone(),
-    ));
+    if mouse_enabled {
+        threads.push(crate::input_capture::windows::start_mouse_hook(
+            state.database.clone(),
+            stop.clone(),
+        ));
+    }
     #[cfg(windows)]
     if keyboard_enabled {
         threads.push(crate::input_capture::windows::start_keyboard_hook(
