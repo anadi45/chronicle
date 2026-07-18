@@ -47,3 +47,12 @@ The Tauri CLI and Windows WebView2 are required for the desktop run. Database fi
 ## Privacy invariant
 
 Capture and persistence must remain fast and reliable even when local AI inference is slow or unavailable. Keyboard capture will be opt-in and privacy exclusions will be implemented before enabling global hooks.
+
+## Current privacy controls
+
+- Foreground, mouse, and keyboard metadata capture are independently opt-in.
+- Keyboard capture stores metadata only; text capture is not enabled.
+- Applications and filesystem paths can be excluded before capture events are persisted.
+- Watched-folder capture is limited to explicitly selected folders and records file metadata, not file contents.
+- Export produces local JSON data; delete-all permanently removes local raw, semantic, embedding, and queue records after confirmation.
+- Queue retries are persisted with attempt counts and retry timestamps, so transient failures do not spin continuously after restart.

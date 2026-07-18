@@ -116,6 +116,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [ ] Add Windows installer icon/resources
 - [ ] Test Windows Defender/antivirus interactions
 - [ ] Document permissions and privacy behavior
+- [x] Document current permissions and privacy behavior
 - [ ] Finalize export/delete/data-retention policy
 
 ## Verification commands
