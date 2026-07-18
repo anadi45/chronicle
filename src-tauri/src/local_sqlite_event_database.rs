@@ -183,6 +183,10 @@ impl Database {
         Ok(())
     }
 
+    pub fn semantic_for_raw_event(&self, raw_event_id: &str) -> Result<Option<SemanticEvent>> {
+        self.connection.query_row("SELECT id, raw_event_id, category, summary, entities_json, relationships_json, confidence, model_name, model_version, created_at FROM semantic_events WHERE raw_event_id = ?1 ORDER BY created_at DESC LIMIT 1", [raw_event_id], |row| Ok(SemanticEvent { id: row.get(0)?, raw_event_id: row.get(1)?, category: row.get(2)?, summary: row.get(3)?, entities_json: row.get(4)?, relationships_json: row.get(5)?, confidence: row.get(6)?, model_name: row.get(7)?, model_version: row.get(8)?, created_at: row.get(9)? })).optional()
+    }
+
     pub fn seed_ready_event(&self) -> Result<()> {
         if self.count_events()? == 0 {
             self.insert_event(&RawEvent {

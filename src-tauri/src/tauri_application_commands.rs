@@ -108,6 +108,11 @@ pub fn record_semantic_event(
 }
 
 #[tauri::command]
+pub fn semantic_for_event(state: State<'_, AppState>, raw_event_id: String) -> Result<Option<SemanticEvent>, String> {
+    state.database.lock().map_err(|_| "database lock poisoned".to_owned())?.semantic_for_raw_event(&raw_event_id).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub fn delete_all_data(state: State<'_, AppState>) -> Result<(), String> {
     state
         .database
