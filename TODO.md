@@ -81,7 +81,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [x] Add retry count and retry timestamp persistence
 - [x] Test retry timestamp scheduling
 - [~] Add queue backlog/progress commands and UI
-- [ ] Add cancellation and backpressure
+- [x] Add cancellation and backpressure
 - [x] Add cancellation for pending queue tasks
 - [x] Add bounded queue backpressure
 - [ ] Test capture while workers are busy
@@ -105,7 +105,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [x] Semantic event persistence and model metadata
 - [ ] Queue status page
 - [ ] Permission diagnostics page
-- [ ] Watched-folder and excluded-application editors
+- [x] Watched-folder and excluded-application editors
 - [x] Wire export button to browser download
 - [x] Wire delete-all button with confirmation
 - [ ] Storage usage and model status indicators
@@ -119,9 +119,9 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [ ] Test elevated apps, UAC, secure desktop, protected windows, and games
 - [ ] Add Windows installer icon/resources
 - [ ] Test Windows Defender/antivirus interactions
-- [ ] Document permissions and privacy behavior
+- [x] Document permissions and privacy behavior
 - [x] Document current permissions and privacy behavior
-- [ ] Finalize export/delete/data-retention policy
+- [x] Finalize export/delete/data-retention policy
 
 ## Verification commands
 
