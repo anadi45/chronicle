@@ -146,10 +146,22 @@ impl Database {
 
     pub fn queue_counts(&self) -> Result<HashMap<String, i64>> {
         let mut counts = HashMap::new();
-        let mut statement = self.connection.prepare("SELECT status, COUNT(*) FROM processing_queue GROUP BY status")?;
-        let rows = statement.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))?;
-        for row in rows { let (status, count) = row?; counts.insert(status, count); }
+        let mut statement = self
+            .connection
+            .prepare("SELECT status, COUNT(*) FROM processing_queue GROUP BY status")?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        for row in rows {
+            let (status, count) = row?;
+            counts.insert(status, count);
+        }
         Ok(counts)
+    }
+
+    pub fn recover_stale_processing_tasks(&self, stale_minutes: u32) -> Result<usize> {
+        let changed = self.connection.execute("UPDATE processing_queue SET status = 'pending', started_at = NULL, error = 'requeued after interrupted processing' WHERE status = 'processing' AND started_at < datetime('now', ?1)", [format!("-{} minutes", stale_minutes)])?;
+        Ok(changed)
     }
 
     pub fn seed_ready_event(&self) -> Result<()> {
@@ -311,5 +323,28 @@ mod tests {
         assert_eq!(claimed.status, QueueStatus::Processing);
         database.finish_task("task-1").unwrap();
         assert!(database.claim_next_task().unwrap().is_none());
+    }
+
+    #[test]
+    fn stale_processing_tasks_are_requeued() {
+        let database = Database::in_memory().unwrap();
+        database
+            .insert_event(&event("event-stale", 1, "Stale", None))
+            .unwrap();
+        database
+            .enqueue_task(&QueueTask {
+                id: "task-stale".into(),
+                raw_event_id: "event-stale".into(),
+                task_type: TaskType::EmbeddingGeneration,
+                status: QueueStatus::Pending,
+                attempts: 0,
+                priority: 0,
+            })
+            .unwrap();
+        let claimed = database.claim_next_task().unwrap().unwrap();
+        assert_eq!(claimed.status, QueueStatus::Processing);
+        database.connection.execute("UPDATE processing_queue SET started_at = datetime('now', '-20 minutes') WHERE id = 'task-stale'", []).unwrap();
+        assert_eq!(database.recover_stale_processing_tasks(10).unwrap(), 1);
+        assert!(database.claim_next_task().unwrap().is_some());
     }
 }

@@ -59,6 +59,9 @@ pub fn run_processing_worker(
     processor: Arc<dyn QueueTaskProcessor>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
+        if let Ok(database) = database.lock() {
+            let _ = database.recover_stale_processing_tasks(10);
+        }
         while !stop.load(Ordering::Relaxed) {
             let task = database
                 .lock()
