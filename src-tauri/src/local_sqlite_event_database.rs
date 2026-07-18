@@ -18,6 +18,7 @@ pub struct RawEvent {
     pub app_name: Option<String>,
     pub executable_path: Option<String>,
     pub process_id: Option<u32>,
+    pub window_handle: Option<u64>,
     pub window_title: Option<String>,
     pub element_name: Option<String>,
     pub text: Option<String>,
@@ -56,17 +57,17 @@ impl Database {
 
     pub fn insert_event(&self, event: &RawEvent) -> Result<()> {
         self.connection.execute(
-            "INSERT INTO raw_events (id, timestamp_ns, event_type, source, app_name, executable_path, process_id, window_title, element_name, text, file_path, metadata_json, privacy_class, confidence, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
-            params![event.id, event.timestamp_ns, event.event_type, event.source, event.app_name, event.executable_path, event.process_id, event.window_title, event.element_name, event.text, event.file_path, event.metadata_json, event.privacy_class, event.confidence, event.created_at],
+            "INSERT INTO raw_events (id, timestamp_ns, event_type, source, app_name, executable_path, process_id, window_handle, window_title, element_name, text, file_path, metadata_json, privacy_class, confidence, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+            params![event.id, event.timestamp_ns, event.event_type, event.source, event.app_name, event.executable_path, event.process_id, event.window_handle, event.window_title, event.element_name, event.text, event.file_path, event.metadata_json, event.privacy_class, event.confidence, event.created_at],
         )?;
         Ok(())
     }
 
     pub fn recent_events(&self, limit: u32, query: Option<&str>) -> Result<Vec<RawEvent>> {
         let mut statement = if query.is_some() {
-            self.connection.prepare("SELECT r.id, r.timestamp_ns, r.event_type, r.source, r.app_name, r.executable_path, r.process_id, r.window_title, r.element_name, r.text, r.file_path, r.metadata_json, r.privacy_class, r.confidence, r.created_at FROM raw_events r JOIN raw_events_fts f ON f.rowid = r.rowid WHERE raw_events_fts MATCH ?1 ORDER BY r.timestamp_ns DESC LIMIT ?2")?
+            self.connection.prepare("SELECT r.id, r.timestamp_ns, r.event_type, r.source, r.app_name, r.executable_path, r.process_id, r.window_handle, r.window_title, r.element_name, r.text, r.file_path, r.metadata_json, r.privacy_class, r.confidence, r.created_at FROM raw_events r JOIN raw_events_fts f ON f.rowid = r.rowid WHERE raw_events_fts MATCH ?1 ORDER BY r.timestamp_ns DESC LIMIT ?2")?
         } else {
-            self.connection.prepare("SELECT id, timestamp_ns, event_type, source, app_name, executable_path, process_id, window_title, element_name, text, file_path, metadata_json, privacy_class, confidence, created_at FROM raw_events ORDER BY timestamp_ns DESC LIMIT ?1")?
+            self.connection.prepare("SELECT id, timestamp_ns, event_type, source, app_name, executable_path, process_id, window_handle, window_title, element_name, text, file_path, metadata_json, privacy_class, confidence, created_at FROM raw_events ORDER BY timestamp_ns DESC LIMIT ?1")?
         };
         let rows = if let Some(query) = query {
             statement.query_map(params![query, limit], map_event)?
@@ -113,6 +114,7 @@ impl Database {
                 app_name: Some("Chronicle".into()),
                 executable_path: None,
                 process_id: None,
+                window_handle: None,
                 window_title: Some("Desktop shell initialized".into()),
                 element_name: None,
                 text: None,
@@ -136,14 +138,15 @@ fn map_event(row: &rusqlite::Row<'_>) -> Result<RawEvent> {
         app_name: row.get(4)?,
         executable_path: row.get(5)?,
         process_id: row.get(6)?,
-        window_title: row.get(7)?,
-        element_name: row.get(8)?,
-        text: row.get(9)?,
-        file_path: row.get(10)?,
-        metadata_json: row.get(11)?,
-        privacy_class: row.get(12)?,
-        confidence: row.get(13)?,
-        created_at: row.get(14)?,
+        window_handle: row.get(7)?,
+        window_title: row.get(8)?,
+        element_name: row.get(9)?,
+        text: row.get(10)?,
+        file_path: row.get(11)?,
+        metadata_json: row.get(12)?,
+        privacy_class: row.get(13)?,
+        confidence: row.get(14)?,
+        created_at: row.get(15)?,
     })
 }
 
@@ -160,6 +163,7 @@ mod tests {
             app_name: Some("Test App".into()),
             executable_path: None,
             process_id: Some(42),
+            window_handle: None,
             window_title: Some(title.into()),
             element_name: None,
             text: text.map(str::to_owned),

@@ -21,14 +21,15 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [x] TypeScript validation and production frontend build
 - [x] Windows WebView2 development startup fix
 - [x] Descriptive module names and module-level Rustdoc
+- [x] Preserve native foreground window handles in raw events
 
 ## Current priority: capture engine
 
-- [~] Enrich foreground events with executable name and executable path
-- [~] Persist capture enabled state when Start/Stop is used
+- [x] Enrich foreground events with executable name and executable path
+- [x] Persist capture enabled state when Start/Stop is used
 - [ ] Add foreground provider shutdown on application exit
-- [ ] Add application exclusion matching and tests
-- [ ] Add process/window handle fields to the public event model
+- [x] Add application exclusion matching and tests
+- [x] Add process/window handle fields to the public event model
 - [ ] Add capture status and last-event health to the UI
 
 ## Input capture

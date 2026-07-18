@@ -26,6 +26,16 @@ pub struct CaptureSettings {
     pub screenshots_enabled: bool,
 }
 
+impl CaptureSettings {
+    pub fn excludes_application(&self, executable_path: &str, app_name: &str) -> bool {
+        self.excluded_applications.iter().any(|excluded| {
+            let pattern = excluded.to_ascii_lowercase();
+            executable_path.to_ascii_lowercase().contains(&pattern)
+                || app_name.to_ascii_lowercase() == pattern
+        })
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum KeyboardMode {
@@ -80,6 +90,7 @@ pub fn normalize_window_event(
         app_name: Some(app_name),
         executable_path,
         process_id,
+        window_handle: None,
         window_title: Some(window_title),
         element_name: None,
         text: None,
@@ -95,11 +106,22 @@ pub fn normalize_window_event(
 pub fn start_foreground_loop(
     database: Arc<std::sync::Mutex<crate::local_sqlite_event_database::Database>>,
     stop: Arc<AtomicBool>,
+    settings: Arc<std::sync::Mutex<CaptureSettings>>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let mut previous: Option<(isize, String)> = None;
         while !stop.load(Ordering::Relaxed) {
-            if let Some((handle, title, process_id)) = current_foreground_window() {
+            if let Some((handle, title, process_id, executable_path, app_name)) =
+                current_foreground_window()
+            {
+                if settings
+                    .lock()
+                    .map(|settings| settings.excludes_application(&executable_path, &app_name))
+                    .unwrap_or(false)
+                {
+                    thread::sleep(Duration::from_millis(500));
+                    continue;
+                }
                 let changed = previous
                     .as_ref()
                     .map(|(old_handle, old_title)| *old_handle != handle || old_title != &title)
@@ -115,11 +137,12 @@ pub fn start_foreground_loop(
                         "window_focused"
                     };
                     let mut event = normalize_window_event(
-                        "Unknown application".into(),
+                        app_name,
                         title.clone(),
-                        None,
+                        Some(executable_path),
                         Some(process_id),
                     );
+                    event.window_handle = Some(handle as u64);
                     event.event_type = event_type.into();
                     event.metadata_json = format!("{{\"window_handle\":{handle}}}");
                     if let Ok(database) = database.lock() {
@@ -137,6 +160,7 @@ pub fn start_foreground_loop(
 pub fn start_foreground_loop(
     _database: Arc<std::sync::Mutex<crate::local_sqlite_event_database::Database>>,
     stop: Arc<AtomicBool>,
+    _settings: Arc<std::sync::Mutex<CaptureSettings>>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         while !stop.load(Ordering::Relaxed) {
@@ -146,7 +170,7 @@ pub fn start_foreground_loop(
 }
 
 #[cfg(windows)]
-fn current_foreground_window() -> Option<(isize, String, u32)> {
+fn current_foreground_window() -> Option<(isize, String, u32, String, String)> {
     use windows::Win32::UI::WindowsAndMessaging::{
         GetForegroundWindow, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId,
     };
@@ -162,7 +186,45 @@ fn current_foreground_window() -> Option<(isize, String, u32)> {
     unsafe {
         GetWindowThreadProcessId(window, Some(&mut process_id));
     }
-    Some((window.0 as isize, title, process_id))
+    let executable_path = process_executable_path(process_id).unwrap_or_default();
+    let app_name = executable_path
+        .rsplit(['\\', '/'])
+        .next()
+        .unwrap_or("unknown")
+        .to_string();
+    Some((
+        window.0 as isize,
+        title,
+        process_id,
+        executable_path,
+        app_name,
+    ))
+}
+
+#[cfg(windows)]
+fn process_executable_path(process_id: u32) -> Option<String> {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
+        PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    let process =
+        unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id).ok()? };
+    let mut buffer = vec![0u16; 1024];
+    let mut length = buffer.len() as u32;
+    let success = unsafe {
+        QueryFullProcessImageNameW(
+            process,
+            PROCESS_NAME_FORMAT(0),
+            windows::core::PWSTR(buffer.as_mut_ptr()),
+            &mut length,
+        )
+        .is_ok()
+    };
+    unsafe {
+        let _ = CloseHandle(process);
+    }
+    success.then(|| String::from_utf16_lossy(&buffer[..length as usize]))
 }
 
 #[cfg(test)]

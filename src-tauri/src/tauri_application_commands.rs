@@ -16,7 +16,7 @@ use tauri::State;
 
 pub struct AppState {
     pub database: Arc<Mutex<Database>>,
-    pub settings: Mutex<CaptureSettings>,
+    pub settings: Arc<Mutex<CaptureSettings>>,
     pub capture_stop: Mutex<Option<Arc<AtomicBool>>>,
     pub capture_thread: Mutex<Option<JoinHandle<()>>>,
 }
@@ -31,7 +31,7 @@ impl AppState {
             .unwrap_or_default();
         Ok(Self {
             database: Arc::new(Mutex::new(database)),
-            settings: Mutex::new(settings),
+            settings: Arc::new(Mutex::new(settings)),
             capture_stop: Mutex::new(None),
             capture_thread: Mutex::new(None),
         })
@@ -138,12 +138,25 @@ pub fn start_capture(state: State<'_, AppState>) -> Result<(), String> {
     let thread = crate::windows_activity_capture::start_foreground_loop(
         state.database.clone(),
         stop.clone(),
+        state.settings.clone(),
     );
     *stop_slot = Some(stop);
     *state
         .capture_thread
         .lock()
         .map_err(|_| "capture thread lock poisoned".to_owned())? = Some(thread);
+    let mut settings = state
+        .settings
+        .lock()
+        .map_err(|_| "settings lock poisoned".to_owned())?;
+    settings.enabled = true;
+    let settings_json = serde_json::to_string(&*settings).map_err(|error| error.to_string())?;
+    state
+        .database
+        .lock()
+        .map_err(|_| "database lock poisoned".to_owned())?
+        .save_setting("capture", &settings_json)
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -165,5 +178,17 @@ pub fn stop_capture(state: State<'_, AppState>) -> Result<(), String> {
     {
         let _ = thread.join();
     }
+    let mut settings = state
+        .settings
+        .lock()
+        .map_err(|_| "settings lock poisoned".to_owned())?;
+    settings.enabled = false;
+    let settings_json = serde_json::to_string(&*settings).map_err(|error| error.to_string())?;
+    state
+        .database
+        .lock()
+        .map_err(|_| "database lock poisoned".to_owned())?
+        .save_setting("capture", &settings_json)
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
