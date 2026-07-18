@@ -2,13 +2,13 @@
 mod activity_capture;
 #[allow(dead_code)]
 mod asynchronous_processing_queue;
+#[allow(dead_code)]
+mod embedding_provider;
 mod filesystem_activity_capture;
 #[allow(dead_code)]
 mod input_capture;
 #[allow(dead_code)]
 mod local_semantic_processing;
-#[allow(dead_code)]
-mod embedding_provider;
 mod local_sqlite_event_database;
 mod tauri_application_commands;
 #[allow(dead_code)]

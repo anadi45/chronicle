@@ -90,6 +90,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [ ] Ensure AI failures never stop capture
 - [~] Add Nomic Embed Text provider
 - [~] Add sqlite-vec storage and similarity search
+- [~] Add durable embedding storage fallback
 - [ ] Add hybrid FTS5/vector ranking
 
 ## UI completion

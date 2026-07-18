@@ -173,9 +173,14 @@ impl Database {
         Ok(counts)
     }
 
-    pub fn processing_status_for_raw_event(&self, raw_event_id: &str) -> Result<Vec<(String, String, u32, Option<String>)>> {
+    pub fn processing_status_for_raw_event(
+        &self,
+        raw_event_id: &str,
+    ) -> Result<Vec<(String, String, u32, Option<String>)>> {
         let mut statement = self.connection.prepare("SELECT task_type, status, attempts, error FROM processing_queue WHERE raw_event_id = ?1 ORDER BY created_at ASC")?;
-        let rows = statement.query_map([raw_event_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))?;
+        let rows = statement.query_map([raw_event_id], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })?;
         rows.collect()
     }
 
@@ -191,6 +196,37 @@ impl Database {
 
     pub fn semantic_for_raw_event(&self, raw_event_id: &str) -> Result<Option<SemanticEvent>> {
         self.connection.query_row("SELECT id, raw_event_id, category, summary, entities_json, relationships_json, confidence, model_name, model_version, created_at FROM semantic_events WHERE raw_event_id = ?1 ORDER BY created_at DESC LIMIT 1", [raw_event_id], |row| Ok(SemanticEvent { id: row.get(0)?, raw_event_id: row.get(1)?, category: row.get(2)?, summary: row.get(3)?, entities_json: row.get(4)?, relationships_json: row.get(5)?, confidence: row.get(6)?, model_name: row.get(7)?, model_version: row.get(8)?, created_at: row.get(9)? })).optional()
+    }
+
+    pub fn insert_embedding(
+        &self,
+        semantic_event_id: &str,
+        model_name: &str,
+        model_version: &str,
+        embedding: &[f32],
+    ) -> Result<()> {
+        self.connection.execute("INSERT INTO semantic_event_embeddings (semantic_event_id, model_name, model_version, dimensions, embedding_json, created_at) VALUES (?1, ?2, ?3, ?4, ?5, datetime('now')) ON CONFLICT(semantic_event_id) DO UPDATE SET model_name=excluded.model_name, model_version=excluded.model_version, dimensions=excluded.dimensions, embedding_json=excluded.embedding_json, created_at=excluded.created_at", params![semantic_event_id, model_name, model_version, embedding.len() as i64, serde_json::to_string(embedding).unwrap_or_else(|_| "[]".into())])?;
+        Ok(())
+    }
+
+    pub fn search_embeddings(&self, query: &[f32], limit: usize) -> Result<Vec<(String, f32)>> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT semantic_event_id, embedding_json FROM semantic_event_embeddings")?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut scored = Vec::new();
+        for row in rows {
+            let (id, json) = row?;
+            let embedding: Vec<f32> = serde_json::from_str(&json).unwrap_or_default();
+            if embedding.len() == query.len() {
+                scored.push((id, cosine_similarity(query, &embedding)));
+            }
+        }
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scored.truncate(limit);
+        Ok(scored)
     }
 
     pub fn seed_ready_event(&self) -> Result<()> {
@@ -237,6 +273,17 @@ fn map_event(row: &rusqlite::Row<'_>) -> Result<RawEvent> {
         confidence: row.get(14)?,
         created_at: row.get(15)?,
     })
+}
+
+fn cosine_similarity(left: &[f32], right: &[f32]) -> f32 {
+    let dot: f32 = left.iter().zip(right).map(|(a, b)| a * b).sum();
+    let left_norm = left.iter().map(|value| value * value).sum::<f32>().sqrt();
+    let right_norm = right.iter().map(|value| value * value).sum::<f32>().sqrt();
+    if left_norm == 0.0 || right_norm == 0.0 {
+        0.0
+    } else {
+        dot / (left_norm * right_norm)
+    }
 }
 
 #[cfg(test)]
@@ -393,5 +440,34 @@ mod tests {
             created_at: "2026-01-01T00:00:00Z".into(),
         };
         assert!(database.insert_semantic_event(&semantic).is_err());
+    }
+
+    #[test]
+    fn embedding_fallback_search_ranks_similar_vectors() {
+        let database = Database::in_memory().unwrap();
+        database
+            .insert_event(&event("event-embed", 1, "Embedding source", None))
+            .unwrap();
+        database
+            .insert_semantic_event(&SemanticEvent {
+                id: "semantic-embed".into(),
+                raw_event_id: "event-embed".into(),
+                category: "test".into(),
+                summary: "vector".into(),
+                entities_json: "[]".into(),
+                relationships_json: "[]".into(),
+                confidence: 1.0,
+                model_name: "test".into(),
+                model_version: "1".into(),
+                created_at: "now".into(),
+            })
+            .unwrap();
+        database
+            .insert_embedding("semantic-embed", "test", "1", &[1.0, 0.0])
+            .unwrap();
+        assert_eq!(
+            database.search_embeddings(&[0.9, 0.1], 1).unwrap()[0].0,
+            "semantic-embed"
+        );
     }
 }

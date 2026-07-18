@@ -76,3 +76,12 @@ CREATE TABLE IF NOT EXISTS app_settings (
 );
 
 CREATE INDEX IF NOT EXISTS processing_queue_pending_idx ON processing_queue(status, priority DESC, created_at ASC);
+
+CREATE TABLE IF NOT EXISTS semantic_event_embeddings (
+    semantic_event_id TEXT PRIMARY KEY REFERENCES semantic_events(id),
+    model_name TEXT NOT NULL,
+    model_version TEXT NOT NULL,
+    dimensions INTEGER NOT NULL,
+    embedding_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
