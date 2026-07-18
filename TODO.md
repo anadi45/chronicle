@@ -71,8 +71,8 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 
 ## Processing Queue
 
-- [ ] Add queue insert/claim/complete/fail repository methods
-- [ ] Add bounded worker loop
+- [x] Add queue insert/claim/complete/fail repository methods
+- [~] Add bounded worker loop
 - [ ] Add crash recovery for `processing` tasks
 - [ ] Add retry count and retry timestamp persistence
 - [ ] Add queue backlog/progress commands and UI

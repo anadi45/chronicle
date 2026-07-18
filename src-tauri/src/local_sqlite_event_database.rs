@@ -4,6 +4,7 @@
 //! events first, while semantic processing may be retried or regenerated. FTS5
 //! is maintained from raw-event triggers so search remains useful without AI.
 
+use crate::asynchronous_processing_queue::{QueueStatus, QueueTask, TaskType};
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension, Result};
 use serde::{Deserialize, Serialize};
@@ -102,6 +103,45 @@ impl Database {
         let events = self.recent_events(100_000, None)?;
         serde_json::to_string_pretty(&HashMap::from([("events", events)]))
             .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))
+    }
+
+    pub fn enqueue_task(&self, task: &QueueTask) -> Result<()> {
+        self.connection.execute("INSERT INTO processing_queue (id, raw_event_id, task_type, status, priority, attempts, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))", params![task.id, task.raw_event_id, serde_json::to_string(&task.task_type).unwrap_or_default().trim_matches('"'), serde_json::to_string(&task.status).unwrap_or_default().trim_matches('"'), task.priority, task.attempts])?;
+        Ok(())
+    }
+
+    pub fn claim_next_task(&self) -> Result<Option<QueueTask>> {
+        let transaction = self.connection.unchecked_transaction()?;
+        let candidate = transaction.query_row("SELECT id, raw_event_id, task_type, attempts, priority FROM processing_queue WHERE status = 'pending' ORDER BY priority DESC, created_at ASC LIMIT 1", [], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, u32>(3)?, row.get::<_, i32>(4)?))).optional()?;
+        let Some((id, raw_event_id, task_type, attempts, priority)) = candidate else {
+            transaction.commit()?;
+            return Ok(None);
+        };
+        transaction.execute("UPDATE processing_queue SET status = 'processing', started_at = datetime('now'), attempts = attempts + 1 WHERE id = ?1", [&id])?;
+        transaction.commit()?;
+        let task_type = match task_type.as_str() {
+            "SemanticTextAnalysis" | "semantic_text_analysis" => TaskType::SemanticTextAnalysis,
+            "SemanticImageAnalysis" | "semantic_image_analysis" => TaskType::SemanticImageAnalysis,
+            _ => TaskType::EmbeddingGeneration,
+        };
+        Ok(Some(QueueTask {
+            id,
+            raw_event_id,
+            task_type,
+            status: QueueStatus::Processing,
+            attempts: attempts + 1,
+            priority,
+        }))
+    }
+
+    pub fn finish_task(&self, task_id: &str) -> Result<()> {
+        self.connection.execute("UPDATE processing_queue SET status = 'complete', completed_at = datetime('now') WHERE id = ?1", [task_id])?;
+        Ok(())
+    }
+    pub fn fail_task(&self, task_id: &str, error: &str, retry: bool) -> Result<()> {
+        let status = if retry { "pending" } else { "failed" };
+        self.connection.execute("UPDATE processing_queue SET status = ?1, error = ?, completed_at = CASE WHEN ?1 = 'failed' THEN datetime('now') ELSE NULL END WHERE id = ?3", params![status, error, task_id])?;
+        Ok(())
     }
 
     pub fn seed_ready_event(&self) -> Result<()> {
@@ -241,5 +281,27 @@ mod tests {
         database.delete_all().unwrap();
         assert_eq!(database.count_events().unwrap(), 0);
         assert!(database.recent_events(10, Some("One")).unwrap().is_empty());
+    }
+
+    #[test]
+    fn queue_claim_and_finish_round_trip() {
+        let database = Database::in_memory().unwrap();
+        database
+            .insert_event(&event("event-1", 1, "Queue source", None))
+            .unwrap();
+        let task = QueueTask {
+            id: "task-1".into(),
+            raw_event_id: "event-1".into(),
+            task_type: TaskType::SemanticTextAnalysis,
+            status: QueueStatus::Pending,
+            attempts: 0,
+            priority: 5,
+        };
+        database.enqueue_task(&task).unwrap();
+        let claimed = database.claim_next_task().unwrap().unwrap();
+        assert_eq!(claimed.id, "task-1");
+        assert_eq!(claimed.status, QueueStatus::Processing);
+        database.finish_task("task-1").unwrap();
+        assert!(database.claim_next_task().unwrap().is_none());
     }
 }
