@@ -6,6 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -47,6 +48,18 @@ impl TransientScreenshotAsset {
     }
 }
 
+#[derive(Default)]
+pub struct TransientScreenshotStore {
+    assets: HashMap<String, TransientScreenshotAsset>,
+}
+
+impl TransientScreenshotStore {
+    pub fn insert(&mut self, asset: TransientScreenshotAsset) { self.assets.insert(asset.raw_event_id.clone(), asset); }
+    pub fn take(&mut self, raw_event_id: &str) -> Option<TransientScreenshotAsset> { self.assets.remove(raw_event_id) }
+    pub fn purge_expired(&mut self, retention: Duration) { self.assets.retain(|_, asset| !asset.expired(retention)); }
+    pub fn len(&self) -> usize { self.assets.len() }
+}
+
 pub trait ActiveWindowScreenshotProvider: Send {
     fn capture_active_window(&self) -> Result<Vec<u8>, String>;
 }
@@ -64,5 +77,13 @@ mod tests {
     fn meaningful_triggers_are_explicit() {
         assert!(ScreenshotTrigger::DoubleClick.meaningful());
         assert!(ScreenshotTrigger::ElementFocused.meaningful());
+    }
+    #[test]
+    fn store_releases_assets_after_processing() {
+        let mut store = TransientScreenshotStore::default();
+        store.insert(TransientScreenshotAsset::new("event".into(), vec![1], "image/png"));
+        assert_eq!(store.len(), 1);
+        assert!(store.take("event").is_some());
+        assert_eq!(store.len(), 0);
     }
 }

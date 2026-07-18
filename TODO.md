@@ -66,7 +66,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [~] Trigger capture after meaningful events
 - [x] Keep image bytes in memory only by default
 - [ ] Associate transient assets with raw events/queue tasks
-- [ ] Release assets after processing or failure
+- [x] Release assets after processing or failure
 - [ ] Add disabled debug-retention mode
 - [ ] Add screenshot privacy and failure tests
 
