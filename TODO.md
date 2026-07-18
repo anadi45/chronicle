@@ -82,10 +82,10 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 
 ## Local AI and semantic events
 
-- [ ] Add Gemma provider configuration and model discovery
-- [ ] Implement structured text analysis
+- [~] Add Gemma provider configuration and model discovery
+- [~] Implement structured text analysis
 - [ ] Implement image analysis
-- [ ] Validate model JSON output
+- [~] Validate model JSON output
 - [ ] Add model version/latency/error metrics
 - [ ] Ensure AI failures never stop capture
 - [ ] Add Nomic Embed Text provider
