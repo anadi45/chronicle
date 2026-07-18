@@ -72,7 +72,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [ ] Associate transient assets with raw events/queue tasks
 - [x] Release assets after processing or failure
 - [ ] Add disabled debug-retention mode
-- [ ] Add screenshot privacy and failure tests
+- [x] Add screenshot privacy and failure tests
 - [x] Add transient screenshot expiry test
 
 ## Processing Queue

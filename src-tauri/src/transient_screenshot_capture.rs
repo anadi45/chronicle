@@ -46,6 +46,7 @@ impl TransientScreenshotAsset {
     pub fn expired(&self, retention: Duration) -> bool {
         self.captured_at.elapsed() >= retention
     }
+    pub fn is_valid(&self) -> bool { !self.bytes.is_empty() && self.mime_type.starts_with("image/") }
 }
 
 #[derive(Default)]
@@ -54,7 +55,7 @@ pub struct TransientScreenshotStore {
 }
 
 impl TransientScreenshotStore {
-    pub fn insert(&mut self, asset: TransientScreenshotAsset) { self.assets.insert(asset.raw_event_id.clone(), asset); }
+    pub fn insert(&mut self, asset: TransientScreenshotAsset) -> bool { if !asset.is_valid() { return false; } self.assets.insert(asset.raw_event_id.clone(), asset); true }
     pub fn take(&mut self, raw_event_id: &str) -> Option<TransientScreenshotAsset> { self.assets.remove(raw_event_id) }
     pub fn purge_expired(&mut self, retention: Duration) { self.assets.retain(|_, asset| !asset.expired(retention)); }
     pub fn len(&self) -> usize { self.assets.len() }
@@ -81,7 +82,7 @@ mod tests {
     #[test]
     fn store_releases_assets_after_processing() {
         let mut store = TransientScreenshotStore::default();
-        store.insert(TransientScreenshotAsset::new("event".into(), vec![1], "image/png"));
+        assert!(store.insert(TransientScreenshotAsset::new("event".into(), vec![1], "image/png")));
         assert_eq!(store.len(), 1);
         assert!(store.take("event").is_some());
         assert_eq!(store.len(), 0);
@@ -92,6 +93,14 @@ mod tests {
         let mut store = TransientScreenshotStore::default();
         store.insert(TransientScreenshotAsset::new("expired".into(), vec![1], "image/png"));
         store.purge_expired(Duration::ZERO);
+        assert_eq!(store.len(), 0);
+    }
+
+    #[test]
+    fn store_rejects_empty_and_non_image_assets() {
+        let mut store = TransientScreenshotStore::default();
+        assert!(!store.insert(TransientScreenshotAsset::new("empty".into(), vec![], "image/png")));
+        assert!(!store.insert(TransientScreenshotAsset::new("text".into(), vec![1], "text/plain")));
         assert_eq!(store.len(), 0);
     }
 }
