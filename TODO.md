@@ -95,7 +95,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 ## UI completion
 
 - [ ] Event inspector with raw JSON and source evidence
-- [ ] Semantic event display and model metadata
+- [~] Semantic event persistence and model metadata
 - [ ] Queue status page
 - [ ] Permission diagnostics page
 - [ ] Watched-folder and excluded-application editors

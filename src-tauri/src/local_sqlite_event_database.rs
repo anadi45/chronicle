@@ -30,6 +30,20 @@ pub struct RawEvent {
     pub created_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SemanticEvent {
+    pub id: String,
+    pub raw_event_id: String,
+    pub category: String,
+    pub summary: String,
+    pub entities_json: String,
+    pub relationships_json: String,
+    pub confidence: f32,
+    pub model_name: String,
+    pub model_version: String,
+    pub created_at: String,
+}
+
 pub struct Database {
     connection: Connection,
 }
@@ -162,6 +176,11 @@ impl Database {
     pub fn recover_stale_processing_tasks(&self, stale_minutes: u32) -> Result<usize> {
         let changed = self.connection.execute("UPDATE processing_queue SET status = 'pending', started_at = NULL, error = 'requeued after interrupted processing' WHERE status = 'processing' AND started_at < datetime('now', ?1)", [format!("-{} minutes", stale_minutes)])?;
         Ok(changed)
+    }
+
+    pub fn insert_semantic_event(&self, event: &SemanticEvent) -> Result<()> {
+        self.connection.execute("INSERT INTO semantic_events (id, raw_event_id, category, summary, entities_json, relationships_json, confidence, model_name, model_version, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)", params![event.id, event.raw_event_id, event.category, event.summary, event.entities_json, event.relationships_json, event.confidence, event.model_name, event.model_version, event.created_at])?;
+        Ok(())
     }
 
     pub fn seed_ready_event(&self) -> Result<()> {
@@ -346,5 +365,23 @@ mod tests {
         database.connection.execute("UPDATE processing_queue SET started_at = datetime('now', '-20 minutes') WHERE id = 'task-stale'", []).unwrap();
         assert_eq!(database.recover_stale_processing_tasks(10).unwrap(), 1);
         assert!(database.claim_next_task().unwrap().is_some());
+    }
+
+    #[test]
+    fn semantic_event_requires_existing_raw_event() {
+        let database = Database::in_memory().unwrap();
+        let semantic = SemanticEvent {
+            id: "semantic-1".into(),
+            raw_event_id: "missing".into(),
+            category: "test".into(),
+            summary: "summary".into(),
+            entities_json: "[]".into(),
+            relationships_json: "[]".into(),
+            confidence: 0.9,
+            model_name: "test-model".into(),
+            model_version: "1".into(),
+            created_at: "2026-01-01T00:00:00Z".into(),
+        };
+        assert!(database.insert_semantic_event(&semantic).is_err());
     }
 }

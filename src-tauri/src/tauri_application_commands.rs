@@ -5,7 +5,7 @@
 //! work is launched in a background thread so invoke handlers stay responsive.
 
 use crate::activity_capture::CaptureSettings;
-use crate::local_sqlite_event_database::{Database, RawEvent};
+use crate::local_sqlite_event_database::{Database, RawEvent, SemanticEvent};
 use std::sync::Mutex;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -91,6 +91,19 @@ pub fn record_event(state: State<'_, AppState>, event: RawEvent) -> Result<(), S
         .lock()
         .map_err(|_| "database lock poisoned".to_owned())?
         .insert_event(&event)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn record_semantic_event(
+    state: State<'_, AppState>,
+    event: SemanticEvent,
+) -> Result<(), String> {
+    state
+        .database
+        .lock()
+        .map_err(|_| "database lock poisoned".to_owned())?
+        .insert_semantic_event(&event)
         .map_err(|error| error.to_string())
 }
 

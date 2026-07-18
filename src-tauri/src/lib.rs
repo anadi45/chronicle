@@ -30,6 +30,7 @@ pub fn run() {
             tauri_application_commands::recent_event_count,
             tauri_application_commands::list_events,
             tauri_application_commands::record_event,
+            tauri_application_commands::record_semantic_event,
             tauri_application_commands::delete_all_data,
             tauri_application_commands::get_capture_settings,
             tauri_application_commands::update_capture_settings,
