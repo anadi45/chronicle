@@ -8,6 +8,8 @@ mod input_capture;
 mod local_sqlite_event_database;
 mod tauri_application_commands;
 #[allow(dead_code)]
+mod transient_screenshot_capture;
+#[allow(dead_code)]
 mod windows_ui_automation_capture;
 
 use tauri::Manager;
