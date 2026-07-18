@@ -12,6 +12,7 @@ use std::sync::{
 };
 use std::thread;
 use std::time::Duration;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 
 pub const MAX_RETRY_ATTEMPTS: u32 = 3;
 
@@ -78,7 +79,9 @@ pub fn run_processing_worker(
                 if let Ok(database) = database.lock() { let _ = database.requeue_processing_tasks(); }
                 break;
             }
-            match processor.process(&task) {
+            let processing_result = catch_unwind(AssertUnwindSafe(|| processor.process(&task)))
+                .unwrap_or_else(|_| Err("processing provider panicked".into()));
+            match processing_result {
                 Ok(()) => {
                     if let Ok(database) = database.lock() {
                         let _ = database.finish_task(&task.id);
@@ -106,5 +109,11 @@ mod tests {
         assert_eq!(MAX_RETRY_ATTEMPTS, 3);
         assert!(retry_delay(2) > retry_delay(1));
         assert_eq!(retry_delay(0), Duration::from_millis(250));
+    }
+
+    #[test]
+    fn provider_panics_are_convertible_to_failures() {
+        let result = catch_unwind(AssertUnwindSafe(|| -> Result<(), String> { panic!("model failure") }));
+        assert!(result.is_err());
     }
 }
