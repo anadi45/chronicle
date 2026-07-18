@@ -58,7 +58,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [x] Bound selected text and control values before persistence
 - [ ] Add graceful fallback for inaccessible/elevated applications
 - [x] Add watched-folder selection
-- [~] Implement create/modify/delete/rename notifications
+- [x] Implement create/modify/delete/rename notifications
 - [x] Add path exclusions
 - [x] Test case-insensitive path exclusions
 - [x] Preserve path exclusion compatibility for existing settings
