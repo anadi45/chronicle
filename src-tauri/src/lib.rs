@@ -48,6 +48,7 @@ pub fn run() {
             tauri_application_commands::set_excluded_paths,
             tauri_application_commands::set_watched_folders,
             tauri_application_commands::processing_queue_status,
+            tauri_application_commands::cancel_pending_processing_tasks,
             tauri_application_commands::processing_status_for_event
         ])
         .on_window_event(|window, event| {

@@ -381,6 +381,11 @@ pub fn processing_queue_status(
 }
 
 #[tauri::command]
+pub fn cancel_pending_processing_tasks(state: State<'_, AppState>) -> Result<usize, String> {
+    state.database.lock().map_err(|_| "database lock poisoned".to_owned())?.cancel_pending_tasks().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub fn processing_status_for_event(
     state: State<'_, AppState>,
     raw_event_id: String,

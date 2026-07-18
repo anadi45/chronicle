@@ -80,6 +80,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [x] Test retry timestamp scheduling
 - [~] Add queue backlog/progress commands and UI
 - [ ] Add cancellation and backpressure
+- [x] Add cancellation for pending queue tasks
 - [ ] Test capture while workers are busy
 
 ## Local AI and semantic events

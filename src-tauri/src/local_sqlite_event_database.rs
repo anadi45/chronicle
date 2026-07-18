@@ -179,6 +179,10 @@ impl Database {
         Ok(counts)
     }
 
+    pub fn cancel_pending_tasks(&self) -> Result<usize> {
+        Ok(self.connection.execute("UPDATE processing_queue SET status = 'cancelled', completed_at = datetime('now') WHERE status = 'pending'", [])?)
+    }
+
     pub fn processing_status_for_raw_event(
         &self,
         raw_event_id: &str,
@@ -416,6 +420,16 @@ mod tests {
         database.fail_task("task-retry", "temporary failure", true).unwrap();
         let retry_at: Option<String> = database.connection.query_row("SELECT retry_at FROM processing_queue WHERE id = 'task-retry'", [], |row| row.get(0)).unwrap();
         assert!(retry_at.is_some());
+        assert!(database.claim_next_task().unwrap().is_none());
+    }
+
+    #[test]
+    fn cancellation_marks_only_pending_tasks() {
+        let database = Database::in_memory().unwrap();
+        database.insert_event(&event("event-cancel", 1, "Cancel", None)).unwrap();
+        database.enqueue_task(&QueueTask { id: "task-cancel".into(), raw_event_id: "event-cancel".into(), task_type: TaskType::EmbeddingGeneration, status: QueueStatus::Pending, attempts: 0, priority: 0 }).unwrap();
+        assert_eq!(database.cancel_pending_tasks().unwrap(), 1);
+        assert_eq!(database.queue_counts().unwrap().get("cancelled"), Some(&1));
         assert!(database.claim_next_task().unwrap().is_none());
     }
 
