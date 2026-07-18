@@ -149,6 +149,20 @@ pub fn set_input_permission(
 }
 
 #[tauri::command]
+pub fn set_excluded_applications(state: State<'_, AppState>, applications: Vec<String>) -> Result<CaptureSettings, String> {
+    let mut settings = state.settings.lock().map_err(|_| "settings lock poisoned".to_owned())?;
+    let mut normalized = Vec::new();
+    for application in applications {
+        let value = application.trim().to_ascii_lowercase();
+        if !value.is_empty() && !normalized.contains(&value) { normalized.push(value); }
+    }
+    settings.excluded_applications = normalized;
+    let json = serde_json::to_string(&*settings).map_err(|error| error.to_string())?;
+    state.database.lock().map_err(|_| "database lock poisoned".to_owned())?.save_setting("capture", &json).map_err(|error| error.to_string())?;
+    Ok(settings.clone())
+}
+
+#[tauri::command]
 pub fn export_data(state: State<'_, AppState>) -> Result<String, String> {
     state
         .database

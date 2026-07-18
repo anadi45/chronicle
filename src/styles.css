@@ -25,3 +25,4 @@ nav { display: grid; gap: 7px; }
 .setting-row small { color: #91a0b0; margin-top: 5px; }
 .setting-row input { width: 18px; height: 18px; accent-color: #88d3ad; }
 .note { margin-top: 22px; }
+.exclusion-editor { display: grid; gap: 8px; margin-top: 28px; padding-top: 22px; border-top: 1px solid #293543; }.exclusion-editor small { color: #91a0b0; }.exclusion-editor textarea { min-height: 90px; resize: vertical; padding: 11px; border: 1px solid #344354; border-radius: 7px; background: #151e28; color: #e8edf5; font: inherit; }
