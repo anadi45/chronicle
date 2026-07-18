@@ -21,6 +21,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [x] TypeScript validation and production frontend build
 - [x] Windows WebView2 development startup fix
 - [x] Descriptive module names and module-level Rustdoc
+- [x] Platform capture folders with shared `mod.rs` and Windows extension modules
 - [x] Preserve native foreground window handles in raw events
 
 ## Current priority: capture engine
@@ -41,6 +42,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [ ] Add protected-field/password/security exclusions
 - [ ] Add text batching and 500–1000 ms debounce
 - [~] Implement mouse click, double-click, right-click, scroll, and drag events
+- [~] Add isolated Windows low-level mouse hook worker
 - [ ] Add keyboard/mouse acceptance tests on Windows
 
 ## UI Automation and filesystem

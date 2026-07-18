@@ -17,6 +17,7 @@ These rules apply to all work in this repository. They are intentionally strict 
 - Use Rust for Windows integration, capture providers, persistence, queue workers, and privacy enforcement.
 - Keep Tauri commands thin: validate input, delegate to a named service/module, and return serializable results.
 - Name modules by responsibility, not vague names. Prefer `windows_activity_capture`, `local_sqlite_event_database`, `asynchronous_processing_queue`, and `tauri_application_commands` over `capture`, `db`, `queue`, or `commands`.
+- Organize platform-specific Rust providers as folders with a shared `mod.rs` contract and platform files such as `windows.rs`, `macos.rs`, and `linux.rs`. Keep Windows API calls out of shared contracts.
 - Add module-level Rustdoc for every native module describing ownership, threading, privacy, and failure behavior.
 - Use typed structs/enums for event types, queue statuses, settings, and command payloads. Avoid unvalidated stringly-typed state when an enum is practical.
 - Keep Windows-only APIs behind `cfg(windows)` and provide a safe non-Windows fallback for compilation/tests.
@@ -73,4 +74,3 @@ npm run build
 - State the active implementation task before editing.
 - Report meaningful blockers with evidence and the smallest safe alternative.
 - Be explicit about what is implemented, what is an interface only, and what remains machine-specific.
-

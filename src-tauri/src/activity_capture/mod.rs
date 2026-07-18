@@ -6,6 +6,10 @@
 //! keyboard capture belong here, behind explicit opt-in settings and exclusion
 //! checks.
 
+// Platform-specific implementations belong in sibling modules such as
+// `windows.rs`, `macos.rs`, and `linux.rs`. The current foreground provider is
+// kept behind `cfg(windows)` while the normalized contract remains shared.
+
 use crate::local_sqlite_event_database::RawEvent;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -17,9 +21,14 @@ use std::thread;
 use std::time::Duration;
 use uuid::Uuid;
 
+#[cfg(windows)]
+pub mod windows;
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CaptureSettings {
     pub enabled: bool,
+    pub mouse_enabled: bool,
+    pub keyboard_enabled: bool,
     pub keyboard_mode: KeyboardMode,
     pub excluded_applications: Vec<String>,
     pub watched_folders: Vec<String>,
@@ -171,7 +180,7 @@ pub fn start_foreground_loop(
 
 #[cfg(windows)]
 fn current_foreground_window() -> Option<(isize, String, u32, String, String)> {
-    use windows::Win32::UI::WindowsAndMessaging::{
+    use ::windows::Win32::UI::WindowsAndMessaging::{
         GetForegroundWindow, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId,
     };
     let window = unsafe { GetForegroundWindow() };
@@ -203,8 +212,8 @@ fn current_foreground_window() -> Option<(isize, String, u32, String, String)> {
 
 #[cfg(windows)]
 fn process_executable_path(process_id: u32) -> Option<String> {
-    use windows::Win32::Foundation::CloseHandle;
-    use windows::Win32::System::Threading::{
+    use ::windows::Win32::Foundation::CloseHandle;
+    use ::windows::Win32::System::Threading::{
         OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
         PROCESS_QUERY_LIMITED_INFORMATION,
     };
@@ -216,7 +225,7 @@ fn process_executable_path(process_id: u32) -> Option<String> {
         QueryFullProcessImageNameW(
             process,
             PROCESS_NAME_FORMAT(0),
-            windows::core::PWSTR(buffer.as_mut_ptr()),
+            ::windows::core::PWSTR(buffer.as_mut_ptr()),
             &mut length,
         )
         .is_ok()

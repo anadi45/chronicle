@@ -5,10 +5,18 @@
 //! protected-field filtering and application exclusions are applied before any
 //! text or coordinates are persisted.
 
+// Add `windows.rs`, `macos.rs`, and `linux.rs` beside this shared contract as
+// native hook implementations are introduced.
+
 use crate::local_sqlite_event_database::RawEvent;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+#[cfg(windows)]
+pub mod windows;
+#[cfg(windows)]
+mod windows_mouse;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct InputCaptureSettings {
