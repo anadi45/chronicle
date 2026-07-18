@@ -23,7 +23,7 @@ pub fn start_filesystem_loop(
     settings: Arc<Mutex<CaptureSettings>>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
-        let mut previous = HashMap::new();
+        let mut previous: HashMap<String, u128> = HashMap::new();
         while !stop.load(Ordering::Relaxed) {
             let folders = settings
                 .lock()
@@ -31,7 +31,7 @@ pub fn start_filesystem_loop(
                 .unwrap_or_default();
             let current = snapshot(&folders);
             for (path, modified) in &current {
-                let event_type = match previous.get(path) {
+                let event_type = match previous.get(path.as_str()) {
                     None => Some("file_created"),
                     Some(old) if old != modified => Some("file_modified"),
                     _ => None,
@@ -40,7 +40,10 @@ pub fn start_filesystem_loop(
                     persist(&database, event_type, path, *modified);
                 }
             }
-            for path in previous.keys().filter(|path| !current.contains_key(*path)) {
+            for path in previous
+                .keys()
+                .filter(|path| !current.contains_key(path.as_str()))
+            {
                 persist(&database, "file_deleted", path, 0);
             }
             previous = current;
