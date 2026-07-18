@@ -27,6 +27,10 @@ impl FocusedElementSnapshot {
         self.element_name = self.element_name.map(|value| value.chars().take(512).collect());
         self.element_value = self.element_value.map(|value| value.chars().take(4096).collect());
         self.selected_text = self.selected_text.map(|value| value.chars().take(4096).collect());
+        if self.control_type.as_deref().is_some_and(|value| value.to_ascii_lowercase().contains("password")) {
+            self.element_value = None;
+            self.selected_text = None;
+        }
         self
     }
 }
@@ -48,7 +52,8 @@ impl UiAutomationProvider for WindowsUiAutomationProvider {
 
 pub fn normalize_focused_element(snapshot: FocusedElementSnapshot) -> RawEvent {
     let snapshot = snapshot.sanitize();
-    RawEvent { id: Uuid::new_v4().to_string(), timestamp_ns: Utc::now().timestamp_nanos_opt().unwrap_or_default(), event_type: "element_focused".into(), source: "windows_ui_automation".into(), app_name: None, executable_path: None, process_id: None, window_handle: None, window_title: None, element_name: snapshot.element_name, text: snapshot.selected_text, file_path: None, metadata_json: serde_json::json!({ "automation_id": snapshot.automation_id, "control_type": snapshot.control_type, "element_value": snapshot.element_value, "class_name": snapshot.class_name, "framework_id": snapshot.framework_id, "bounds": snapshot.bounds_json }).to_string(), privacy_class: "ui_automation_metadata".into(), confidence: 1.0, created_at: Utc::now().to_rfc3339() }
+    let protected = snapshot.control_type.as_deref().is_some_and(|value| value.to_ascii_lowercase().contains("password"));
+    RawEvent { id: Uuid::new_v4().to_string(), timestamp_ns: Utc::now().timestamp_nanos_opt().unwrap_or_default(), event_type: "element_focused".into(), source: "windows_ui_automation".into(), app_name: None, executable_path: None, process_id: None, window_handle: None, window_title: None, element_name: snapshot.element_name, text: snapshot.selected_text, file_path: None, metadata_json: serde_json::json!({ "automation_id": snapshot.automation_id, "control_type": snapshot.control_type, "element_value": snapshot.element_value, "class_name": snapshot.class_name, "framework_id": snapshot.framework_id, "bounds": snapshot.bounds_json }).to_string(), privacy_class: if protected { "protected_field".into() } else { "ui_automation_metadata".into() }, confidence: 1.0, created_at: Utc::now().to_rfc3339() }
 }
 
 #[cfg(test)]
@@ -71,5 +76,13 @@ mod tests {
         let snapshot = FocusedElementSnapshot { selected_text: Some("x".repeat(5000)), element_value: Some("y".repeat(5000)), ..Default::default() }.sanitize();
         assert_eq!(snapshot.selected_text.unwrap().len(), 4096);
         assert_eq!(snapshot.element_value.unwrap().len(), 4096);
+    }
+
+    #[test]
+    fn password_controls_never_retain_values() {
+        let event = normalize_focused_element(FocusedElementSnapshot { control_type: Some("PasswordBox".into()), element_value: Some("secret".into()), selected_text: Some("secret".into()), ..Default::default() });
+        assert_eq!(event.privacy_class, "protected_field");
+        assert!(event.text.is_none());
+        assert!(!event.metadata_json.contains("secret"));
     }
 }

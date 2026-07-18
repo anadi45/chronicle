@@ -42,6 +42,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [x] Persist independent keyboard/mouse permission settings
 - [ ] Implement allowlisted text capture
 - [ ] Add protected-field/password/security exclusions
+- [x] Add protected-field/password/security exclusions for UI Automation
 - [ ] Add text batching and 500–1000 ms debounce
 - [~] Implement mouse click, double-click, right-click, scroll, and drag events
 - [x] Add isolated Windows low-level mouse hook worker
