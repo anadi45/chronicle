@@ -85,7 +85,7 @@ pub fn run_processing_worker(
                 Err(error) => {
                     let retry = task.attempts < 3;
                     if let Ok(database) = database.lock() {
-                        let _ = database.fail_task(&task.id, &error, retry);
+                        let _ = database.fail_task(&task.id, &error, retry, task.attempts);
                     }
                     if retry {
                         thread::sleep(retry_delay(task.attempts));

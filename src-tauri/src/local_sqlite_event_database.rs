@@ -158,9 +158,9 @@ impl Database {
         self.connection.execute("UPDATE processing_queue SET status = 'complete', completed_at = datetime('now') WHERE id = ?1", [task_id])?;
         Ok(())
     }
-    pub fn fail_task(&self, task_id: &str, error: &str, retry: bool) -> Result<()> {
+    pub fn fail_task(&self, task_id: &str, error: &str, retry: bool, attempt: u32) -> Result<()> {
         if retry {
-            let retry_seconds = 250u64.saturating_mul(2u64.saturating_pow(0)).max(250) / 1000;
+            let retry_seconds = (250u64.saturating_mul(2u64.saturating_pow(attempt.min(8))) / 1000).max(1);
             self.connection.execute("UPDATE processing_queue SET status = 'pending', error = ?1, retry_at = datetime('now', '+' || ?2 || ' seconds'), completed_at = NULL WHERE id = ?3", params![error, retry_seconds.max(1), task_id])?;
         } else {
             self.connection.execute("UPDATE processing_queue SET status = 'failed', error = ?1, retry_at = NULL, completed_at = datetime('now') WHERE id = ?2", params![error, task_id])?;
@@ -425,7 +425,7 @@ mod tests {
         database.insert_event(&event("event-retry", 1, "Retry", None)).unwrap();
         database.enqueue_task(&QueueTask { id: "task-retry".into(), raw_event_id: "event-retry".into(), task_type: TaskType::SemanticTextAnalysis, status: QueueStatus::Pending, attempts: 0, priority: 0 }).unwrap();
         database.claim_next_task().unwrap().unwrap();
-        database.fail_task("task-retry", "temporary failure", true).unwrap();
+        database.fail_task("task-retry", "temporary failure", true, 3).unwrap();
         let retry_at: Option<String> = database.connection.query_row("SELECT retry_at FROM processing_queue WHERE id = 'task-retry'", [], |row| row.get(0)).unwrap();
         assert!(retry_at.is_some());
         assert!(database.claim_next_task().unwrap().is_none());
