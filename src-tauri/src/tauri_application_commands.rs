@@ -29,6 +29,9 @@ pub struct CaptureStatus {
     pub persisted_event_count: i64,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ProcessingQueueStatus { pub pending: i64, pub processing: i64, pub complete: i64, pub failed: i64, pub cancelled: i64 }
+
 impl AppState {
     pub fn initialize() -> rusqlite::Result<Self> {
         let database = Database::open()?;
@@ -304,6 +307,12 @@ pub fn capture_status(state: State<'_, AppState>) -> Result<CaptureStatus, Strin
         foreground_provider_available: cfg!(windows),
         persisted_event_count,
     })
+}
+
+#[tauri::command]
+pub fn processing_queue_status(state: State<'_, AppState>) -> Result<ProcessingQueueStatus, String> {
+    let counts = state.database.lock().map_err(|_| "database lock poisoned".to_owned())?.queue_counts().map_err(|error| error.to_string())?;
+    Ok(ProcessingQueueStatus { pending: *counts.get("pending").unwrap_or(&0), processing: *counts.get("processing").unwrap_or(&0), complete: *counts.get("complete").unwrap_or(&0), failed: *counts.get("failed").unwrap_or(&0), cancelled: *counts.get("cancelled").unwrap_or(&0) })
 }
 
 pub fn stop_capture_state(state: &AppState) {

@@ -76,7 +76,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [~] Add queue retry limit and worker stop handling
 - [ ] Add crash recovery for `processing` tasks
 - [ ] Add retry count and retry timestamp persistence
-- [ ] Add queue backlog/progress commands and UI
+- [~] Add queue backlog/progress commands and UI
 - [ ] Add cancellation and backpressure
 - [ ] Test capture while workers are busy
 

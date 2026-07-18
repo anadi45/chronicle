@@ -144,6 +144,14 @@ impl Database {
         Ok(())
     }
 
+    pub fn queue_counts(&self) -> Result<HashMap<String, i64>> {
+        let mut counts = HashMap::new();
+        let mut statement = self.connection.prepare("SELECT status, COUNT(*) FROM processing_queue GROUP BY status")?;
+        let rows = statement.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))?;
+        for row in rows { let (status, count) = row?; counts.insert(status, count); }
+        Ok(counts)
+    }
+
     pub fn seed_ready_event(&self) -> Result<()> {
         if self.count_events()? == 0 {
             self.insert_event(&RawEvent {

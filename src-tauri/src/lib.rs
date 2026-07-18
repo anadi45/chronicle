@@ -40,6 +40,7 @@ pub fn run() {
             tauri_application_commands::set_input_permission,
             tauri_application_commands::set_excluded_applications,
             tauri_application_commands::set_watched_folders
+            ,tauri_application_commands::processing_queue_status
         ])
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
