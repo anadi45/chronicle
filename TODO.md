@@ -34,12 +34,13 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 
 ## Input capture
 
-- [ ] Add explicit keyboard permission/on-off flow
-- [ ] Implement metadata-only keyboard hook
+- [~] Add explicit keyboard permission/on-off flow
+- [~] Implement metadata-only keyboard hook
+- [x] Add normalized keyboard/mouse event contracts and privacy metadata
 - [ ] Implement allowlisted text capture
 - [ ] Add protected-field/password/security exclusions
 - [ ] Add text batching and 500–1000 ms debounce
-- [ ] Implement mouse click, double-click, right-click, scroll, and drag events
+- [~] Implement mouse click, double-click, right-click, scroll, and drag events
 - [ ] Add keyboard/mouse acceptance tests on Windows
 
 ## UI Automation and filesystem
