@@ -18,7 +18,7 @@ pub struct AppState {
     pub database: Arc<Mutex<Database>>,
     pub settings: Arc<Mutex<CaptureSettings>>,
     pub capture_stop: Mutex<Option<Arc<AtomicBool>>>,
-    pub capture_thread: Mutex<Option<JoinHandle<()>>>,
+    pub capture_threads: Mutex<Vec<JoinHandle<()>>>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -41,7 +41,7 @@ impl AppState {
             database: Arc::new(Mutex::new(database)),
             settings: Arc::new(Mutex::new(settings)),
             capture_stop: Mutex::new(None),
-            capture_thread: Mutex::new(None),
+            capture_threads: Mutex::new(Vec::new()),
         })
     }
 }
@@ -148,11 +148,17 @@ pub fn start_capture(state: State<'_, AppState>) -> Result<(), String> {
         stop.clone(),
         state.settings.clone(),
     );
-    *stop_slot = Some(stop);
-    *state
-        .capture_thread
+    *stop_slot = Some(stop.clone());
+    let mut threads = state
+        .capture_threads
         .lock()
-        .map_err(|_| "capture thread lock poisoned".to_owned())? = Some(thread);
+        .map_err(|_| "capture thread lock poisoned".to_owned())?;
+    threads.push(thread);
+    #[cfg(windows)]
+    threads.push(crate::input_capture::windows::start_mouse_hook(
+        state.database.clone(),
+        stop.clone(),
+    ));
     let mut settings = state
         .settings
         .lock()
@@ -200,8 +206,8 @@ pub fn stop_capture_state(state: &AppState) {
             stop.store(true, Ordering::Relaxed);
         }
     }
-    if let Ok(mut thread_slot) = state.capture_thread.lock() {
-        if let Some(thread) = thread_slot.take() {
+    if let Ok(mut thread_slot) = state.capture_threads.lock() {
+        for thread in thread_slot.drain(..) {
             let _ = thread.join();
         }
     }
