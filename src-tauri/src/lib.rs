@@ -25,7 +25,9 @@ pub fn run() {
             commands::delete_all_data,
             commands::get_capture_settings,
             commands::update_capture_settings,
-            commands::export_data
+            commands::export_data,
+            commands::start_capture,
+            commands::stop_capture
         ])
         .run(tauri::generate_context!())
         .expect("error while running Chronicle");

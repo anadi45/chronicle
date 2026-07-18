@@ -1,11 +1,18 @@
 use crate::capture::CaptureSettings;
 use crate::db::{Database, RawEvent};
 use std::sync::Mutex;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+use std::thread::JoinHandle;
 use tauri::State;
 
 pub struct AppState {
-    pub database: Mutex<Database>,
+    pub database: Arc<Mutex<Database>>,
     pub settings: Mutex<CaptureSettings>,
+    pub capture_stop: Mutex<Option<Arc<AtomicBool>>>,
+    pub capture_thread: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl AppState {
@@ -17,8 +24,10 @@ impl AppState {
             .and_then(|json| serde_json::from_str(&json).ok())
             .unwrap_or_default();
         Ok(Self {
-            database: Mutex::new(database),
+            database: Arc::new(Mutex::new(database)),
             settings: Mutex::new(settings),
+            capture_stop: Mutex::new(None),
+            capture_thread: Mutex::new(None),
         })
     }
 }
@@ -108,4 +117,44 @@ pub fn export_data(state: State<'_, AppState>) -> Result<String, String> {
         .map_err(|_| "database lock poisoned".to_owned())?
         .export_json()
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn start_capture(state: State<'_, AppState>) -> Result<(), String> {
+    let mut stop_slot = state
+        .capture_stop
+        .lock()
+        .map_err(|_| "capture lock poisoned".to_owned())?;
+    if stop_slot.is_some() {
+        return Ok(());
+    }
+    let stop = Arc::new(AtomicBool::new(false));
+    let thread = crate::capture::start_foreground_loop(state.database.clone(), stop.clone());
+    *stop_slot = Some(stop);
+    *state
+        .capture_thread
+        .lock()
+        .map_err(|_| "capture thread lock poisoned".to_owned())? = Some(thread);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn stop_capture(state: State<'_, AppState>) -> Result<(), String> {
+    if let Some(stop) = state
+        .capture_stop
+        .lock()
+        .map_err(|_| "capture lock poisoned".to_owned())?
+        .take()
+    {
+        stop.store(true, Ordering::Relaxed);
+    }
+    if let Some(thread) = state
+        .capture_thread
+        .lock()
+        .map_err(|_| "capture thread lock poisoned".to_owned())?
+        .take()
+    {
+        let _ = thread.join();
+    }
+    Ok(())
 }

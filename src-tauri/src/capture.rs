@@ -1,6 +1,12 @@
 use crate::db::RawEvent;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+use std::thread;
+use std::time::Duration;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -75,6 +81,80 @@ pub fn normalize_window_event(
         confidence: 1.0,
         created_at: Utc::now().to_rfc3339(),
     }
+}
+
+#[cfg(windows)]
+pub fn start_foreground_loop(
+    database: Arc<std::sync::Mutex<crate::db::Database>>,
+    stop: Arc<AtomicBool>,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        let mut previous: Option<(isize, String)> = None;
+        while !stop.load(Ordering::Relaxed) {
+            if let Some((handle, title, process_id)) = current_foreground_window() {
+                let changed = previous
+                    .as_ref()
+                    .map(|(old_handle, old_title)| *old_handle != handle || old_title != &title)
+                    .unwrap_or(true);
+                if changed {
+                    let event_type = if previous
+                        .as_ref()
+                        .map(|(old_handle, _)| *old_handle == handle)
+                        .unwrap_or(false)
+                    {
+                        "window_title_changed"
+                    } else {
+                        "window_focused"
+                    };
+                    let mut event = normalize_window_event(
+                        "Unknown application".into(),
+                        title.clone(),
+                        None,
+                        Some(process_id),
+                    );
+                    event.event_type = event_type.into();
+                    event.metadata_json = format!("{{\"window_handle\":{handle}}}");
+                    if let Ok(database) = database.lock() {
+                        let _ = database.insert_event(&event);
+                    }
+                    previous = Some((handle, title));
+                }
+            }
+            thread::sleep(Duration::from_millis(500));
+        }
+    })
+}
+
+#[cfg(not(windows))]
+pub fn start_foreground_loop(
+    _database: Arc<std::sync::Mutex<crate::db::Database>>,
+    stop: Arc<AtomicBool>,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        while !stop.load(Ordering::Relaxed) {
+            thread::sleep(Duration::from_millis(500));
+        }
+    })
+}
+
+#[cfg(windows)]
+fn current_foreground_window() -> Option<(isize, String, u32)> {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId,
+    };
+    let window = unsafe { GetForegroundWindow() };
+    if window.0.is_null() {
+        return None;
+    }
+    let length = unsafe { GetWindowTextLengthW(window) };
+    let mut buffer = vec![0u16; (length + 1) as usize];
+    let written = unsafe { GetWindowTextW(window, &mut buffer) };
+    let title = String::from_utf16_lossy(&buffer[..written as usize]);
+    let mut process_id = 0u32;
+    unsafe {
+        GetWindowThreadProcessId(window, Some(&mut process_id));
+    }
+    Some((window.0 as isize, title, process_id))
 }
 
 #[cfg(test)]
