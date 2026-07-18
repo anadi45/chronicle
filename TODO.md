@@ -42,8 +42,9 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [ ] Add protected-field/password/security exclusions
 - [ ] Add text batching and 500–1000 ms debounce
 - [~] Implement mouse click, double-click, right-click, scroll, and drag events
-- [~] Add isolated Windows low-level mouse hook worker
+- [x] Add isolated Windows low-level mouse hook worker
 - [x] Wire mouse hook into capture start/stop lifecycle
+- [x] Add Windows message pump and mouse click/double-click/scroll/drag state handling
 - [ ] Add keyboard/mouse acceptance tests on Windows
 
 ## UI Automation and filesystem

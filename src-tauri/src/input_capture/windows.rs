@@ -16,7 +16,7 @@ use std::sync::{mpsc, Arc, Mutex, OnceLock};
 #[cfg(windows)]
 use std::thread;
 #[cfg(windows)]
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[cfg(windows)]
 #[derive(Clone, Copy)]
@@ -39,15 +39,34 @@ pub fn start_mouse_hook(
         let (sender, receiver) = mpsc::channel();
         let _ = MOUSE_SENDER.set(Mutex::new(Some(sender)));
         let hook = unsafe { install_hook() };
+        let mut left_down: Option<(i32, i32)> = None;
+        let mut last_left_click: Option<(Instant, i32, i32)> = None;
         while !stop.load(Ordering::Relaxed) {
+            pump_window_messages();
             if let Ok(message) = receiver.recv_timeout(Duration::from_millis(100)) {
-                let event = normalize_mouse_event(
-                    message.event_type,
-                    message.x,
-                    message.y,
-                    message.button,
-                    None,
-                );
+                let mut event_type = message.event_type;
+                if message.event_type == "mouse_click" {
+                    if let Some((time, old_x, old_y)) = last_left_click {
+                        if time.elapsed() <= Duration::from_millis(500)
+                            && (old_x - message.x).abs() <= 4
+                            && (old_y - message.y).abs() <= 4
+                        {
+                            event_type = "mouse_double_click";
+                        }
+                    }
+                    last_left_click = Some((Instant::now(), message.x, message.y));
+                    left_down = Some((message.x, message.y));
+                } else if message.event_type == "mouse_move" {
+                    if let Some((down_x, down_y)) = left_down {
+                        if (down_x - message.x).abs() > 4 || (down_y - message.y).abs() > 4 {
+                            event_type = "mouse_drag_started";
+                        }
+                    }
+                } else if message.event_type == "mouse_left_up" && left_down.take().is_some() {
+                    event_type = "mouse_drag_ended";
+                }
+                let event =
+                    normalize_mouse_event(event_type, message.x, message.y, message.button, None);
                 if let Ok(database) = database.lock() {
                     let _ = database.insert_event(&event);
                 }
@@ -67,6 +86,20 @@ pub fn start_mouse_hook(
 }
 
 #[cfg(windows)]
+fn pump_window_messages() {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        DispatchMessageW, PeekMessageW, TranslateMessage, MSG, PM_REMOVE,
+    };
+    let mut message = MSG::default();
+    unsafe {
+        while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
+            let _ = TranslateMessage(&message);
+            DispatchMessageW(&message);
+        }
+    }
+}
+
+#[cfg(windows)]
 unsafe fn install_hook() -> windows::Win32::UI::WindowsAndMessaging::HHOOK {
     use windows::Win32::UI::WindowsAndMessaging::{SetWindowsHookExW, WH_MOUSE_LL};
     SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_callback), None, 0).unwrap_or_default()
@@ -80,7 +113,8 @@ unsafe extern "system" fn mouse_callback(
 ) -> windows::Win32::Foundation::LRESULT {
     use windows::Win32::UI::WindowsAndMessaging::CallNextHookEx;
     use windows::Win32::UI::WindowsAndMessaging::{
-        MSLLHOOKSTRUCT, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_MOUSEWHEEL, WM_RBUTTONDOWN,
+        MSLLHOOKSTRUCT, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MOUSEMOVE, WM_MOUSEWHEEL,
+        WM_RBUTTONDOWN, WM_RBUTTONUP,
     };
     if code >= 0 && lparam.0 != 0 {
         let data = &*(lparam.0 as *const MSLLHOOKSTRUCT);
@@ -88,6 +122,9 @@ unsafe extern "system" fn mouse_callback(
             WM_LBUTTONDOWN => ("mouse_click", Some("left")),
             WM_RBUTTONDOWN => ("mouse_right_click", Some("right")),
             WM_MBUTTONDOWN => ("mouse_click", Some("middle")),
+            WM_LBUTTONUP => ("mouse_left_up", Some("left")),
+            WM_RBUTTONUP => ("mouse_right_up", Some("right")),
+            WM_MOUSEMOVE => ("mouse_move", None),
             WM_MOUSEWHEEL => ("mouse_scroll", None),
             _ => ("mouse_input", None),
         };
