@@ -33,7 +33,7 @@ pub fn start_filesystem_loop(
             let current = snapshot(&folders, &excluded_paths);
             let removed: Vec<(String, u128)> = previous.iter().filter(|(path, _)| !current.contains_key(path.as_str())).map(|(path, modified)| (path.clone(), *modified)).collect();
             let added: Vec<(String, u128)> = current.iter().filter(|(path, _)| !previous.contains_key(path.as_str())).map(|(path, modified)| (path.clone(), *modified)).collect();
-            for ((old_path, old_modified), (new_path, new_modified)) in removed.iter().zip(added.iter()).filter(|((_, old), (_, new))| old == new && *old > 0) {
+            for ((old_path, _old_modified), (new_path, new_modified)) in removed.iter().zip(added.iter()).filter(|((_, old), (_, new))| old == new && *old > 0) {
                 persist(&database, "file_renamed", new_path, *new_modified);
                 let _ = old_path;
             }
@@ -51,7 +51,7 @@ pub fn start_filesystem_loop(
                 .keys()
                 .filter(|path| !current.contains_key(path.as_str()))
             {
-                if !removed.iter().zip(added.iter()).any(|((old, old_modified), (new, new_modified))| old == path && old_modified == new_modified) { persist(&database, "file_deleted", path, 0); }
+                if !removed.iter().zip(added.iter()).any(|((old, old_modified), (_new, new_modified))| old == path && old_modified == new_modified) { persist(&database, "file_deleted", path, 0); }
             }
             previous = current;
             thread::sleep(Duration::from_secs(2));
