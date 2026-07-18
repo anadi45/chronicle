@@ -85,4 +85,10 @@ mod tests {
         assert!(event.text.is_none());
         assert!(!event.metadata_json.contains("secret"));
     }
+
+    #[test]
+    fn unavailable_or_inaccessible_focus_returns_empty_result() {
+        let provider = WindowsUiAutomationProvider;
+        assert!(provider.focused_element().unwrap().is_none());
+    }
 }

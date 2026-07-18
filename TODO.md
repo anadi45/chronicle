@@ -56,7 +56,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [~] Capture control type, name, value, class, framework, and bounds
 - [ ] Capture selected text where available
 - [x] Bound selected text and control values before persistence
-- [ ] Add graceful fallback for inaccessible/elevated applications
+- [x] Add graceful fallback for inaccessible/elevated applications
 - [x] Add watched-folder selection
 - [x] Implement create/modify/delete/rename notifications
 - [x] Add path exclusions
