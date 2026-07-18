@@ -187,6 +187,10 @@ impl Database {
         Ok(self.connection.execute("UPDATE processing_queue SET status = 'cancelled', completed_at = datetime('now') WHERE status = 'pending'", [])?)
     }
 
+    pub fn requeue_processing_tasks(&self) -> Result<usize> {
+        Ok(self.connection.execute("UPDATE processing_queue SET status = 'pending', started_at = NULL WHERE status = 'processing'", [])?)
+    }
+
     pub fn processing_status_for_raw_event(
         &self,
         raw_event_id: &str,
@@ -435,6 +439,16 @@ mod tests {
         assert_eq!(database.cancel_pending_tasks().unwrap(), 1);
         assert_eq!(database.queue_counts().unwrap().get("cancelled"), Some(&1));
         assert!(database.claim_next_task().unwrap().is_none());
+    }
+
+    #[test]
+    fn processing_tasks_can_be_requeued_on_shutdown() {
+        let database = Database::in_memory().unwrap();
+        database.insert_event(&event("event-shutdown", 1, "Shutdown", None)).unwrap();
+        database.enqueue_task(&QueueTask { id: "task-shutdown".into(), raw_event_id: "event-shutdown".into(), task_type: TaskType::EmbeddingGeneration, status: QueueStatus::Pending, attempts: 0, priority: 0 }).unwrap();
+        database.claim_next_task().unwrap().unwrap();
+        assert_eq!(database.requeue_processing_tasks().unwrap(), 1);
+        assert!(database.claim_next_task().unwrap().is_some());
     }
 
     #[test]

@@ -72,6 +72,10 @@ pub fn run_processing_worker(
                 thread::sleep(Duration::from_millis(250));
                 continue;
             };
+            if stop.load(Ordering::Relaxed) {
+                if let Ok(database) = database.lock() { let _ = database.requeue_processing_tasks(); }
+                break;
+            }
             match processor.process(&task) {
                 Ok(()) => {
                     if let Ok(database) = database.lock() {
@@ -89,6 +93,7 @@ pub fn run_processing_worker(
                 }
             }
         }
+        if let Ok(database) = database.lock() { let _ = database.requeue_processing_tasks(); }
     })
 }
 #[cfg(test)]
