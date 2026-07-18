@@ -100,3 +100,24 @@ fn persist(database: &Arc<Mutex<Database>>, event_type: &str, path: &str, modifi
         let _ = database.insert_event(&event);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::snapshot;
+    use std::fs;
+
+    #[test]
+    fn snapshot_recursively_finds_files_and_ignores_missing_folders() {
+        let root = std::env::temp_dir().join(format!("chronicle-fs-{}", std::process::id()));
+        let nested = root.join("nested");
+        fs::create_dir_all(&nested).unwrap();
+        let file = nested.join("note.txt");
+        fs::write(&file, "hello").unwrap();
+
+        let result = snapshot(&[root.to_string_lossy().into_owned(), "missing-folder".into()]);
+        assert!(result.contains_key(&file.to_string_lossy().to_string()));
+        assert!(result.values().all(|modified| *modified > 0));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+}
