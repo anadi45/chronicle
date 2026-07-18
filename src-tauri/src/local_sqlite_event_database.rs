@@ -1,3 +1,9 @@
+//! Local SQLite persistence for append-only raw evidence and derived records.
+//!
+//! The database is the reliability boundary: capture writes compact normalized
+//! events first, while semantic processing may be retried or regenerated. FTS5
+//! is maintained from raw-event triggers so search remains useful without AI.
+
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension, Result};
 use serde::{Deserialize, Serialize};

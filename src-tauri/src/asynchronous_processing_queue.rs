@@ -1,3 +1,9 @@
+//! Asynchronous post-capture processing contracts.
+//!
+//! Queue tasks are deliberately separate from capture. A slow or unavailable
+//! model must not block persistence of raw evidence. Workers will claim bounded
+//! batches, retry transient failures, and retain model/version metadata.
+
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 

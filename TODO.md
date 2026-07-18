@@ -20,6 +20,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [x] Rust repository/capture/queue tests
 - [x] TypeScript validation and production frontend build
 - [x] Windows WebView2 development startup fix
+- [x] Descriptive module names and module-level Rustdoc
 
 ## Current priority: capture engine
 
@@ -113,4 +114,3 @@ npm test
 npm run build
 npm run tauri dev
 ```
-

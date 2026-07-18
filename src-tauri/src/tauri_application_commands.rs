@@ -1,5 +1,11 @@
-use crate::capture::CaptureSettings;
-use crate::db::{Database, RawEvent};
+//! Tauri IPC commands exposed to the desktop UI.
+//!
+//! Commands validate/clamp user-facing inputs and delegate work to the
+//! database, capture lifecycle, and settings services. Long-running capture
+//! work is launched in a background thread so invoke handlers stay responsive.
+
+use crate::local_sqlite_event_database::{Database, RawEvent};
+use crate::windows_activity_capture::CaptureSettings;
 use std::sync::Mutex;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -129,7 +135,10 @@ pub fn start_capture(state: State<'_, AppState>) -> Result<(), String> {
         return Ok(());
     }
     let stop = Arc::new(AtomicBool::new(false));
-    let thread = crate::capture::start_foreground_loop(state.database.clone(), stop.clone());
+    let thread = crate::windows_activity_capture::start_foreground_loop(
+        state.database.clone(),
+        stop.clone(),
+    );
     *stop_slot = Some(stop);
     *state
         .capture_thread

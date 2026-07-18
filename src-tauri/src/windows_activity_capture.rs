@@ -1,4 +1,12 @@
-use crate::db::RawEvent;
+//! Windows activity capture providers.
+//!
+//! This module owns the boundary between Windows activity APIs and Chronicle's
+//! normalized raw-event model. Capture runs on a background thread and must
+//! never wait for semantic AI processing. Privacy-sensitive providers such as
+//! keyboard capture belong here, behind explicit opt-in settings and exclusion
+//! checks.
+
+use crate::local_sqlite_event_database::RawEvent;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::sync::{
@@ -85,7 +93,7 @@ pub fn normalize_window_event(
 
 #[cfg(windows)]
 pub fn start_foreground_loop(
-    database: Arc<std::sync::Mutex<crate::db::Database>>,
+    database: Arc<std::sync::Mutex<crate::local_sqlite_event_database::Database>>,
     stop: Arc<AtomicBool>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
@@ -127,7 +135,7 @@ pub fn start_foreground_loop(
 
 #[cfg(not(windows))]
 pub fn start_foreground_loop(
-    _database: Arc<std::sync::Mutex<crate::db::Database>>,
+    _database: Arc<std::sync::Mutex<crate::local_sqlite_event_database::Database>>,
     stop: Arc<AtomicBool>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
