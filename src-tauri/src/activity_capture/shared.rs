@@ -28,6 +28,8 @@ pub struct CaptureSettings {
     pub keyboard_enabled: bool,
     pub keyboard_mode: KeyboardMode,
     pub excluded_applications: Vec<String>,
+    #[serde(default)]
+    pub excluded_paths: Vec<String>,
     pub watched_folders: Vec<String>,
     pub screenshots_enabled: bool,
 }
@@ -39,6 +41,11 @@ impl CaptureSettings {
             executable_path.to_ascii_lowercase().contains(&pattern)
                 || app_name.to_ascii_lowercase() == pattern
         })
+    }
+
+    pub fn excludes_path(&self, path: &str) -> bool {
+        let candidate = path.to_ascii_lowercase();
+        self.excluded_paths.iter().any(|excluded| candidate.contains(&excluded.to_ascii_lowercase()))
     }
 }
 

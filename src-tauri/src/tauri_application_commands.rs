@@ -219,6 +219,18 @@ pub fn set_excluded_applications(
 }
 
 #[tauri::command]
+pub fn set_excluded_paths(
+    state: State<'_, AppState>,
+    paths: Vec<String>,
+) -> Result<CaptureSettings, String> {
+    let mut settings = state.settings.lock().map_err(|_| "settings lock poisoned".to_owned())?;
+    settings.excluded_paths = paths.into_iter().map(|path| path.trim().to_owned()).filter(|path| !path.is_empty()).collect();
+    let json = serde_json::to_string(&*settings).map_err(|error| error.to_string())?;
+    state.database.lock().map_err(|_| "database lock poisoned".to_owned())?.save_setting("capture", &json).map_err(|error| error.to_string())?;
+    Ok(settings.clone())
+}
+
+#[tauri::command]
 pub fn set_watched_folders(
     state: State<'_, AppState>,
     folders: Vec<String>,

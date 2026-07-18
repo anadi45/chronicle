@@ -29,7 +29,8 @@ pub fn start_filesystem_loop(
                 .lock()
                 .map(|settings| settings.watched_folders.clone())
                 .unwrap_or_default();
-            let current = snapshot(&folders);
+            let excluded_paths = settings.lock().map(|settings| settings.excluded_paths.clone()).unwrap_or_default();
+            let current = snapshot(&folders, &excluded_paths);
             for (path, modified) in &current {
                 let event_type = match previous.get(path.as_str()) {
                     None => Some("file_created"),
@@ -51,21 +52,22 @@ pub fn start_filesystem_loop(
         }
     })
 }
-fn snapshot(folders: &[String]) -> HashMap<String, u128> {
+fn snapshot(folders: &[String], excluded_paths: &[String]) -> HashMap<String, u128> {
     let mut result = HashMap::new();
     for folder in folders {
-        collect_files(Path::new(folder), &mut result);
+        collect_files(Path::new(folder), excluded_paths, &mut result);
     }
     result
 }
-fn collect_files(path: &Path, result: &mut HashMap<String, u128>) {
+fn collect_files(path: &Path, excluded_paths: &[String], result: &mut HashMap<String, u128>) {
+    if excluded_paths.iter().any(|excluded| path.to_string_lossy().to_ascii_lowercase().contains(&excluded.to_ascii_lowercase())) { return; }
     let Ok(entries) = fs::read_dir(path) else {
         return;
     };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            collect_files(&path, result);
+            collect_files(&path, excluded_paths, result);
         } else if let Ok(metadata) = entry.metadata() {
             let modified = metadata
                 .modified()
@@ -114,7 +116,7 @@ mod tests {
         let file = nested.join("note.txt");
         fs::write(&file, "hello").unwrap();
 
-        let result = snapshot(&[root.to_string_lossy().into_owned(), "missing-folder".into()]);
+        let result = snapshot(&[root.to_string_lossy().into_owned(), "missing-folder".into()], &["nested/skip".into()]);
         assert!(result.contains_key(&file.to_string_lossy().to_string()));
         assert!(result.values().all(|modified| *modified > 0));
 

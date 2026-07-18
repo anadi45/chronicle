@@ -57,7 +57,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [ ] Add graceful fallback for inaccessible/elevated applications
 - [x] Add watched-folder selection
 - [~] Implement create/modify/delete/rename notifications
-- [ ] Add path exclusions
+- [x] Add path exclusions
 - [x] Add filesystem snapshot tests
 
 ## Screenshots and transient assets
