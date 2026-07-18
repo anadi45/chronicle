@@ -1,0 +1,76 @@
+# Chronicle agent rules
+
+These rules apply to all work in this repository. They are intentionally strict because Chronicle observes sensitive computer activity and runs native Windows code.
+
+## Product invariants
+
+- Capture and raw persistence must remain useful when AI is disabled, slow, unavailable, or incorrect.
+- Raw events are append-only evidence. Semantic interpretations must reference raw events and must never overwrite them.
+- Capture work must never run on the UI thread and must never wait for model inference.
+- Transient screenshots and other visual assets must be held in memory by default and released after processing.
+- Keyboard capture is opt-in. Never persist passwords, credentials, banking/payment input, secure-desktop input, UAC input, or configured excluded applications.
+- Do not add cloud processing, telemetry, automatic updates, browser extensions, or unrestricted filesystem scanning without explicit product direction.
+
+## Tauri architecture
+
+- Keep the frontend in `src/` and native/backend code in `src-tauri/src/`.
+- Use Rust for Windows integration, capture providers, persistence, queue workers, and privacy enforcement.
+- Keep Tauri commands thin: validate input, delegate to a named service/module, and return serializable results.
+- Name modules by responsibility, not vague names. Prefer `windows_activity_capture`, `local_sqlite_event_database`, `asynchronous_processing_queue`, and `tauri_application_commands` over `capture`, `db`, `queue`, or `commands`.
+- Add module-level Rustdoc for every native module describing ownership, threading, privacy, and failure behavior.
+- Use typed structs/enums for event types, queue statuses, settings, and command payloads. Avoid unvalidated stringly-typed state when an enum is practical.
+- Keep Windows-only APIs behind `cfg(windows)` and provide a safe non-Windows fallback for compilation/tests.
+- Never use `unwrap()` in capture loops, command handlers, or worker threads. Convert failures into logged, non-fatal results where capture can continue.
+- Do not hold a database mutex across sleeps, Windows API waits, model calls, or filesystem operations.
+- All background threads need a stop signal and must be joined or safely detached during application shutdown.
+
+## Database and migrations
+
+- Use migrations for schema changes; never silently mutate production tables in application code.
+- Preserve foreign keys and append-only raw evidence.
+- Keep FTS/vector indexes rebuildable from source records.
+- Add repository tests for every new insert, query, update, delete, retry, and migration path.
+- Bound query limits and worker queues to prevent unbounded memory growth.
+
+## Testing and verification
+
+Before handing off a change, run the smallest relevant checks and then the full suite when practical:
+
+```powershell
+npm run test:frontend
+npm test
+npm run build
+```
+
+- Add unit tests for normalization, privacy filtering, retry behavior, database ordering, and failure handling.
+- Add Windows integration tests for hooks and permissions when the implementation touches native APIs.
+- Do not claim a native provider is complete when only its interface or normalizer exists.
+- Update `TODO.md` whenever a task moves between pending, in progress, and complete.
+- Update `README.md` when setup, commands, architecture, privacy behavior, or verification steps change.
+
+## Git safety and commit conventions
+
+- Never run `git commit`, `git push`, `git merge`, `git rebase`, `git tag`, or other history-changing commands unless the user gives an explicit command to do so in the current conversation.
+- “Implement”, “finish”, “clean up”, or “prepare” does not authorize committing or pushing.
+- Read `git status`, inspect the diff, and run relevant tests before a user-authorized commit.
+- Never include unrelated user changes in a commit. Ask if the intended scope is ambiguous.
+- Never force-push, reset hard, delete branches, or rewrite history unless explicitly requested.
+- Use Conventional Commits with a required type and imperative subject:
+  - `feat:` user-visible capability
+  - `fix:` bug correction
+  - `refactor:` behavior-preserving restructuring
+  - `test:` tests only
+  - `docs:` documentation only
+  - `chore:` tooling/dependency/maintenance work
+  - `perf:` performance improvement
+  - `build:` build/release changes
+- Keep the subject concise, lowercase after the prefix, and free of a trailing period.
+- If a change has a breaking API or schema change, use `!` or a `BREAKING CHANGE:` footer.
+- Report the exact commit hash and push result after an authorized Git operation.
+
+## Communication
+
+- State the active implementation task before editing.
+- Report meaningful blockers with evidence and the smallest safe alternative.
+- Be explicit about what is implemented, what is an interface only, and what remains machine-specific.
+
