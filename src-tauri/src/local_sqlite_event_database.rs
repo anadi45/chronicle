@@ -408,6 +408,18 @@ mod tests {
     }
 
     #[test]
+    fn failed_retry_persists_a_future_retry_timestamp() {
+        let database = Database::in_memory().unwrap();
+        database.insert_event(&event("event-retry", 1, "Retry", None)).unwrap();
+        database.enqueue_task(&QueueTask { id: "task-retry".into(), raw_event_id: "event-retry".into(), task_type: TaskType::SemanticTextAnalysis, status: QueueStatus::Pending, attempts: 0, priority: 0 }).unwrap();
+        database.claim_next_task().unwrap().unwrap();
+        database.fail_task("task-retry", "temporary failure", true).unwrap();
+        let retry_at: Option<String> = database.connection.query_row("SELECT retry_at FROM processing_queue WHERE id = 'task-retry'", [], |row| row.get(0)).unwrap();
+        assert!(retry_at.is_some());
+        assert!(database.claim_next_task().unwrap().is_none());
+    }
+
+    #[test]
     fn stale_processing_tasks_are_requeued() {
         let database = Database::in_memory().unwrap();
         database
