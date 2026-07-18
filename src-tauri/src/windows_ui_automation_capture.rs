@@ -22,6 +22,15 @@ pub struct FocusedElementSnapshot {
     pub selected_text: Option<String>,
 }
 
+impl FocusedElementSnapshot {
+    pub fn sanitize(mut self) -> Self {
+        self.element_name = self.element_name.map(|value| value.chars().take(512).collect());
+        self.element_value = self.element_value.map(|value| value.chars().take(4096).collect());
+        self.selected_text = self.selected_text.map(|value| value.chars().take(4096).collect());
+        self
+    }
+}
+
 pub trait UiAutomationProvider: Send {
     fn is_available(&self) -> bool;
     fn focused_element(&self) -> Result<Option<FocusedElementSnapshot>, String>;
@@ -38,6 +47,7 @@ impl UiAutomationProvider for WindowsUiAutomationProvider {
 }
 
 pub fn normalize_focused_element(snapshot: FocusedElementSnapshot) -> RawEvent {
+    let snapshot = snapshot.sanitize();
     RawEvent { id: Uuid::new_v4().to_string(), timestamp_ns: Utc::now().timestamp_nanos_opt().unwrap_or_default(), event_type: "element_focused".into(), source: "windows_ui_automation".into(), app_name: None, executable_path: None, process_id: None, window_handle: None, window_title: None, element_name: snapshot.element_name, text: snapshot.selected_text, file_path: None, metadata_json: serde_json::json!({ "automation_id": snapshot.automation_id, "control_type": snapshot.control_type, "element_value": snapshot.element_value, "class_name": snapshot.class_name, "framework_id": snapshot.framework_id, "bounds": snapshot.bounds_json }).to_string(), privacy_class: "ui_automation_metadata".into(), confidence: 1.0, created_at: Utc::now().to_rfc3339() }
 }
 
@@ -54,5 +64,12 @@ mod tests {
         assert_eq!(event.event_type, "element_focused");
         assert_eq!(event.source, "windows_ui_automation");
         assert!(event.metadata_json.contains("Button"));
+    }
+
+    #[test]
+    fn bounds_selected_text_and_control_values() {
+        let snapshot = FocusedElementSnapshot { selected_text: Some("x".repeat(5000)), element_value: Some("y".repeat(5000)), ..Default::default() }.sanitize();
+        assert_eq!(snapshot.selected_text.unwrap().len(), 4096);
+        assert_eq!(snapshot.element_value.unwrap().len(), 4096);
     }
 }

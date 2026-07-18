@@ -54,6 +54,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [~] Read focused UI Automation element
 - [~] Capture control type, name, value, class, framework, and bounds
 - [ ] Capture selected text where available
+- [x] Bound selected text and control values before persistence
 - [ ] Add graceful fallback for inaccessible/elevated applications
 - [x] Add watched-folder selection
 - [~] Implement create/modify/delete/rename notifications
