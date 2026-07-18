@@ -78,7 +78,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 
 - [x] Add queue insert/claim/complete/fail repository methods
 - [~] Add bounded worker loop
-- [~] Add queue retry limit and worker stop handling
+- [x] Add queue retry limit and worker stop handling
 - [~] Add crash recovery for `processing` tasks
 - [x] Requeue claimed work during graceful worker shutdown
 - [x] Add retry count and retry timestamp persistence

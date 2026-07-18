@@ -13,6 +13,8 @@ use std::sync::{
 use std::thread;
 use std::time::Duration;
 
+pub const MAX_RETRY_ATTEMPTS: u32 = 3;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskType {
@@ -83,7 +85,7 @@ pub fn run_processing_worker(
                     }
                 }
                 Err(error) => {
-                    let retry = task.attempts < 3;
+                    let retry = task.attempts < MAX_RETRY_ATTEMPTS;
                     if let Ok(database) = database.lock() {
                         let _ = database.fail_task(&task.id, &error, retry, task.attempts);
                     }
@@ -101,6 +103,7 @@ mod tests {
     use super::*;
     #[test]
     fn retries_back_off() {
+        assert_eq!(MAX_RETRY_ATTEMPTS, 3);
         assert!(retry_delay(2) > retry_delay(1));
         assert_eq!(retry_delay(0), Duration::from_millis(250));
     }
