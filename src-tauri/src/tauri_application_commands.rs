@@ -21,6 +21,14 @@ pub struct AppState {
     pub capture_thread: Mutex<Option<JoinHandle<()>>>,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CaptureStatus {
+    pub enabled: bool,
+    pub foreground_provider_available: bool,
+    pub active: bool,
+    pub persisted_event_count: i64,
+}
+
 impl AppState {
     pub fn initialize() -> rusqlite::Result<Self> {
         let database = Database::open()?;
@@ -161,23 +169,47 @@ pub fn start_capture(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn stop_capture(state: State<'_, AppState>) -> Result<(), String> {
-    if let Some(stop) = state
+pub fn capture_status(state: State<'_, AppState>) -> Result<CaptureStatus, String> {
+    let enabled = state
+        .settings
+        .lock()
+        .map_err(|_| "settings lock poisoned".to_owned())?
+        .enabled;
+    let active = state
         .capture_stop
         .lock()
         .map_err(|_| "capture lock poisoned".to_owned())?
-        .take()
-    {
-        stop.store(true, Ordering::Relaxed);
-    }
-    if let Some(thread) = state
-        .capture_thread
+        .is_some();
+    let persisted_event_count = state
+        .database
         .lock()
-        .map_err(|_| "capture thread lock poisoned".to_owned())?
-        .take()
-    {
-        let _ = thread.join();
+        .map_err(|_| "database lock poisoned".to_owned())?
+        .count_events()
+        .map_err(|error| error.to_string())?;
+    Ok(CaptureStatus {
+        enabled,
+        active,
+        foreground_provider_available: cfg!(windows),
+        persisted_event_count,
+    })
+}
+
+pub fn stop_capture_state(state: &AppState) {
+    if let Ok(mut stop_slot) = state.capture_stop.lock() {
+        if let Some(stop) = stop_slot.take() {
+            stop.store(true, Ordering::Relaxed);
+        }
     }
+    if let Ok(mut thread_slot) = state.capture_thread.lock() {
+        if let Some(thread) = thread_slot.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+#[tauri::command]
+pub fn stop_capture(state: State<'_, AppState>) -> Result<(), String> {
+    stop_capture_state(&state);
     let mut settings = state
         .settings
         .lock()

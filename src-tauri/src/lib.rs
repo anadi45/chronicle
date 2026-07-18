@@ -5,6 +5,7 @@ mod tauri_application_commands;
 #[allow(dead_code)]
 mod windows_activity_capture;
 
+use tauri::Manager;
 use tauri_application_commands::AppState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -27,8 +28,15 @@ pub fn run() {
             tauri_application_commands::update_capture_settings,
             tauri_application_commands::export_data,
             tauri_application_commands::start_capture,
-            tauri_application_commands::stop_capture
+            tauri_application_commands::stop_capture,
+            tauri_application_commands::capture_status
         ])
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                let state = window.app_handle().state::<AppState>();
+                tauri_application_commands::stop_capture_state(&state);
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running Chronicle");
 }

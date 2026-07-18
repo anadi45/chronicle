@@ -27,10 +27,10 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 
 - [x] Enrich foreground events with executable name and executable path
 - [x] Persist capture enabled state when Start/Stop is used
-- [ ] Add foreground provider shutdown on application exit
+- [x] Add foreground provider shutdown on application exit
 - [x] Add application exclusion matching and tests
 - [x] Add process/window handle fields to the public event model
-- [ ] Add capture status and last-event health to the UI
+- [x] Add capture status and last-event health to the UI
 
 ## Input capture
 
