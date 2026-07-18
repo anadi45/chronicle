@@ -86,4 +86,12 @@ mod tests {
         assert!(store.take("event").is_some());
         assert_eq!(store.len(), 0);
     }
+
+    #[test]
+    fn store_purges_expired_assets() {
+        let mut store = TransientScreenshotStore::default();
+        store.insert(TransientScreenshotAsset::new("expired".into(), vec![1], "image/png"));
+        store.purge_expired(Duration::ZERO);
+        assert_eq!(store.len(), 0);
+    }
 }
