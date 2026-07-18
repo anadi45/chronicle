@@ -88,8 +88,8 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [~] Validate model JSON output
 - [ ] Add model version/latency/error metrics
 - [ ] Ensure AI failures never stop capture
-- [ ] Add Nomic Embed Text provider
-- [ ] Add sqlite-vec storage and similarity search
+- [~] Add Nomic Embed Text provider
+- [~] Add sqlite-vec storage and similarity search
 - [ ] Add hybrid FTS5/vector ranking
 
 ## UI completion

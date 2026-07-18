@@ -173,6 +173,12 @@ impl Database {
         Ok(counts)
     }
 
+    pub fn processing_status_for_raw_event(&self, raw_event_id: &str) -> Result<Vec<(String, String, u32, Option<String>)>> {
+        let mut statement = self.connection.prepare("SELECT task_type, status, attempts, error FROM processing_queue WHERE raw_event_id = ?1 ORDER BY created_at ASC")?;
+        let rows = statement.query_map([raw_event_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))?;
+        rows.collect()
+    }
+
     pub fn recover_stale_processing_tasks(&self, stale_minutes: u32) -> Result<usize> {
         let changed = self.connection.execute("UPDATE processing_queue SET status = 'pending', started_at = NULL, error = 'requeued after interrupted processing' WHERE status = 'processing' AND started_at < datetime('now', ?1)", [format!("-{} minutes", stale_minutes)])?;
         Ok(changed)

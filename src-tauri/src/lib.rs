@@ -7,6 +7,8 @@ mod filesystem_activity_capture;
 mod input_capture;
 #[allow(dead_code)]
 mod local_semantic_processing;
+#[allow(dead_code)]
+mod embedding_provider;
 mod local_sqlite_event_database;
 mod tauri_application_commands;
 #[allow(dead_code)]
@@ -44,7 +46,8 @@ pub fn run() {
             tauri_application_commands::set_input_permission,
             tauri_application_commands::set_excluded_applications,
             tauri_application_commands::set_watched_folders,
-            tauri_application_commands::processing_queue_status
+            tauri_application_commands::processing_queue_status,
+            tauri_application_commands::processing_status_for_event
         ])
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
