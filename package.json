@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "test": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "test:frontend": "tsc -b --pretty false",
     "preview": "vite preview",
     "tauri": "tauri"
   },
@@ -23,4 +25,3 @@
     "vite": "^6.3.5"
   }
 }
-

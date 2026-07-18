@@ -31,6 +31,16 @@ CREATE VIRTUAL TABLE IF NOT EXISTS raw_events_fts USING fts5(
     content='raw_events', content_rowid='rowid'
 );
 
+CREATE TRIGGER IF NOT EXISTS raw_events_ai AFTER INSERT ON raw_events BEGIN
+    INSERT INTO raw_events_fts(rowid, app_name, window_title, element_name, element_value, selected_text, text, file_path)
+    VALUES (new.rowid, new.app_name, new.window_title, new.element_name, new.element_value, new.selected_text, new.text, new.file_path);
+END;
+
+CREATE TRIGGER IF NOT EXISTS raw_events_ad AFTER DELETE ON raw_events BEGIN
+    INSERT INTO raw_events_fts(raw_events_fts, rowid, app_name, window_title, element_name, element_value, selected_text, text, file_path)
+    VALUES ('delete', old.rowid, old.app_name, old.window_title, old.element_name, old.element_value, old.selected_text, old.text, old.file_path);
+END;
+
 CREATE TABLE IF NOT EXISTS semantic_events (
     id TEXT PRIMARY KEY,
     raw_event_id TEXT NOT NULL REFERENCES raw_events(id),
@@ -59,3 +69,10 @@ CREATE TABLE IF NOT EXISTS processing_queue (
     completed_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS processing_queue_pending_idx ON processing_queue(status, priority DESC, created_at ASC);
