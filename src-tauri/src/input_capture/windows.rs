@@ -6,6 +6,8 @@
 //! applications.
 
 #[cfg(windows)]
+use super::normalize_keyboard_event;
+#[cfg(windows)]
 use super::normalize_mouse_event;
 #[cfg(windows)]
 use crate::local_sqlite_event_database::Database;
@@ -29,6 +31,68 @@ struct MouseMessage {
 
 #[cfg(windows)]
 static MOUSE_SENDER: OnceLock<Mutex<Option<mpsc::Sender<MouseMessage>>>> = OnceLock::new();
+
+#[cfg(windows)]
+static KEYBOARD_SENDER: OnceLock<Mutex<Option<mpsc::Sender<u32>>>> = OnceLock::new();
+
+#[cfg(windows)]
+pub fn start_keyboard_hook(
+    database: Arc<Mutex<Database>>,
+    stop: Arc<AtomicBool>,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        let (sender, receiver) = mpsc::channel();
+        let _ = KEYBOARD_SENDER.set(Mutex::new(Some(sender)));
+        let hook = unsafe { install_keyboard_hook() };
+        while !stop.load(Ordering::Relaxed) {
+            pump_window_messages();
+            if let Ok(key_code) = receiver.recv_timeout(Duration::from_millis(100)) {
+                let event = normalize_keyboard_event("key_down", key_code, None, None);
+                if let Ok(database) = database.lock() {
+                    let _ = database.insert_event(&event);
+                }
+            }
+        }
+        if !hook.is_invalid() {
+            unsafe {
+                let _ = windows::Win32::UI::WindowsAndMessaging::UnhookWindowsHookEx(hook);
+            }
+        }
+        if let Some(slot) = KEYBOARD_SENDER.get() {
+            if let Ok(mut sender) = slot.lock() {
+                *sender = None;
+            }
+        }
+    })
+}
+
+#[cfg(windows)]
+unsafe fn install_keyboard_hook() -> windows::Win32::UI::WindowsAndMessaging::HHOOK {
+    use windows::Win32::UI::WindowsAndMessaging::{SetWindowsHookExW, WH_KEYBOARD_LL};
+    SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_callback), None, 0).unwrap_or_default()
+}
+
+#[cfg(windows)]
+unsafe extern "system" fn keyboard_callback(
+    code: i32,
+    wparam: windows::Win32::Foundation::WPARAM,
+    lparam: windows::Win32::Foundation::LPARAM,
+) -> windows::Win32::Foundation::LRESULT {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CallNextHookEx, KBDLLHOOKSTRUCT, WM_KEYDOWN, WM_SYSKEYDOWN,
+    };
+    if code >= 0 && lparam.0 != 0 && matches!(wparam.0 as u32, WM_KEYDOWN | WM_SYSKEYDOWN) {
+        let data = &*(lparam.0 as *const KBDLLHOOKSTRUCT);
+        if let Some(slot) = KEYBOARD_SENDER.get() {
+            if let Ok(sender) = slot.lock() {
+                if let Some(sender) = sender.as_ref() {
+                    let _ = sender.send(data.vkCode);
+                }
+            }
+        }
+    }
+    CallNextHookEx(None, code, wparam, lparam)
+}
 
 #[cfg(windows)]
 pub fn start_mouse_hook(

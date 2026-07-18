@@ -36,7 +36,8 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 ## Input capture
 
 - [~] Add explicit keyboard permission/on-off flow
-- [~] Implement metadata-only keyboard hook
+- [x] Implement metadata-only keyboard hook
+- [x] Add Windows low-level keyboard hook worker
 - [x] Add normalized keyboard/mouse event contracts and privacy metadata
 - [ ] Implement allowlisted text capture
 - [ ] Add protected-field/password/security exclusions

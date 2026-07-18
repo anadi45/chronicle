@@ -143,6 +143,11 @@ pub fn start_capture(state: State<'_, AppState>) -> Result<(), String> {
         return Ok(());
     }
     let stop = Arc::new(AtomicBool::new(false));
+    let keyboard_enabled = state
+        .settings
+        .lock()
+        .map_err(|_| "settings lock poisoned".to_owned())?
+        .keyboard_enabled;
     let thread = crate::activity_capture::start_foreground_loop(
         state.database.clone(),
         stop.clone(),
@@ -159,6 +164,13 @@ pub fn start_capture(state: State<'_, AppState>) -> Result<(), String> {
         state.database.clone(),
         stop.clone(),
     ));
+    #[cfg(windows)]
+    if keyboard_enabled {
+        threads.push(crate::input_capture::windows::start_keyboard_hook(
+            state.database.clone(),
+            stop.clone(),
+        ));
+    }
     let mut settings = state
         .settings
         .lock()
