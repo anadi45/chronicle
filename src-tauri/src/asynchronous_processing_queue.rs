@@ -4,7 +4,13 @@
 //! model must not block persistence of raw evidence. Workers will claim bounded
 //! batches, retry transient failures, and retain model/version metadata.
 
+use crate::local_sqlite_event_database::Database;
 use serde::{Deserialize, Serialize};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
+use std::thread;
 use std::time::Duration;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -41,6 +47,46 @@ pub trait Embedder: Send + Sync {
 }
 pub fn retry_delay(attempt: u32) -> Duration {
     Duration::from_millis(250u64.saturating_mul(2u64.saturating_pow(attempt.min(8))))
+}
+
+pub trait QueueTaskProcessor: Send + Sync {
+    fn process(&self, task: &QueueTask) -> Result<(), String>;
+}
+
+pub fn run_processing_worker(
+    database: Arc<Mutex<Database>>,
+    stop: Arc<AtomicBool>,
+    processor: Arc<dyn QueueTaskProcessor>,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        while !stop.load(Ordering::Relaxed) {
+            let task = database
+                .lock()
+                .ok()
+                .and_then(|database| database.claim_next_task().ok())
+                .flatten();
+            let Some(task) = task else {
+                thread::sleep(Duration::from_millis(250));
+                continue;
+            };
+            match processor.process(&task) {
+                Ok(()) => {
+                    if let Ok(database) = database.lock() {
+                        let _ = database.finish_task(&task.id);
+                    }
+                }
+                Err(error) => {
+                    let retry = task.attempts < 3;
+                    if let Ok(database) = database.lock() {
+                        let _ = database.fail_task(&task.id, &error, retry);
+                    }
+                    if retry {
+                        thread::sleep(retry_delay(task.attempts));
+                    }
+                }
+            }
+        }
+    })
 }
 #[cfg(test)]
 mod tests {
