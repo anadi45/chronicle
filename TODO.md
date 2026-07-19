@@ -117,6 +117,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 ## UI completion
 
 - [x] Replace raw-event FTS search with semantic-event FTS search
+- [x] Add separate Raw Evidence page and Timeline CTA
 - [x] Hide raw capture events from Timeline/Search; show only persisted LLM-processed insights
 - [x] Event inspector with raw JSON and source evidence
 - [x] Semantic event persistence and model metadata
