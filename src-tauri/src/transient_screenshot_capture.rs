@@ -29,6 +29,7 @@ impl ScreenshotTrigger {
 #[derive(Debug, Clone)]
 pub struct TransientScreenshotAsset {
     pub raw_event_id: String,
+    pub queue_task_id: Option<String>,
     pub captured_at: Instant,
     pub bytes: Vec<u8>,
     pub mime_type: String,
@@ -38,6 +39,7 @@ impl TransientScreenshotAsset {
     pub fn new(raw_event_id: String, bytes: Vec<u8>, mime_type: impl Into<String>) -> Self {
         Self {
             raw_event_id,
+            queue_task_id: None,
             captured_at: Instant::now(),
             bytes,
             mime_type: mime_type.into(),
@@ -56,6 +58,7 @@ pub struct TransientScreenshotStore {
 
 impl TransientScreenshotStore {
     pub fn insert(&mut self, asset: TransientScreenshotAsset) -> bool { if !asset.is_valid() { return false; } self.assets.insert(asset.raw_event_id.clone(), asset); true }
+    pub fn associate_queue_task(&mut self, raw_event_id: &str, queue_task_id: String) -> bool { if let Some(asset) = self.assets.get_mut(raw_event_id) { asset.queue_task_id = Some(queue_task_id); true } else { false } }
     pub fn take(&mut self, raw_event_id: &str) -> Option<TransientScreenshotAsset> { self.assets.remove(raw_event_id) }
     pub fn purge_expired(&mut self, retention: Duration) { self.assets.retain(|_, asset| !asset.expired(retention)); }
     pub fn len(&self) -> usize { self.assets.len() }
@@ -86,6 +89,14 @@ mod tests {
         assert_eq!(store.len(), 1);
         assert!(store.take("event").is_some());
         assert_eq!(store.len(), 0);
+    }
+
+    #[test]
+    fn store_associates_asset_with_queue_task() {
+        let mut store = TransientScreenshotStore::default();
+        store.insert(TransientScreenshotAsset::new("event".into(), vec![1], "image/png"));
+        assert!(store.associate_queue_task("event", "task".into()));
+        assert_eq!(store.take("event").unwrap().queue_task_id.as_deref(), Some("task"));
     }
 
     #[test]
