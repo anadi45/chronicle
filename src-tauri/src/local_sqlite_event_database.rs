@@ -508,6 +508,14 @@ mod tests {
     }
 
     #[test]
+    fn hybrid_rank_combines_text_and_vector_results() {
+        let database = Database::in_memory().unwrap();
+        let ranked = database.hybrid_rank(&["text-only".into(), "shared".into()], &[("vector-only".into(), 0.9), ("shared".into(), 0.8)], 3);
+        assert_eq!(ranked[0], "shared");
+        assert_eq!(ranked.len(), 3);
+    }
+
+    #[test]
     fn embedding_fallback_search_ranks_similar_vectors() {
         let database = Database::in_memory().unwrap();
         database
