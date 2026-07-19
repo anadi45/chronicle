@@ -27,6 +27,8 @@ pub struct CaptureSettings {
     pub mouse_enabled: bool,
     pub keyboard_enabled: bool,
     pub keyboard_mode: KeyboardMode,
+    #[serde(default)]
+    pub keyboard_text_allowlist: Vec<String>,
     pub excluded_applications: Vec<String>,
     #[serde(default)]
     pub excluded_paths: Vec<String>,
@@ -46,6 +48,10 @@ impl CaptureSettings {
     pub fn excludes_path(&self, path: &str) -> bool {
         let candidate = path.to_ascii_lowercase();
         self.excluded_paths.iter().any(|excluded| candidate.contains(&excluded.to_ascii_lowercase()))
+    }
+
+    pub fn allows_keyboard_text(&self, app_name: &str) -> bool {
+        matches!(self.keyboard_mode, KeyboardMode::AllowlistedText) && self.keyboard_text_allowlist.iter().any(|allowed| allowed.eq_ignore_ascii_case(app_name))
     }
 }
 
@@ -269,5 +275,6 @@ mod tests {
     fn legacy_settings_default_path_exclusions_to_empty() {
         let settings: CaptureSettings = serde_json::from_str(r#"{"enabled":true,"mouse_enabled":false,"keyboard_enabled":false,"keyboard_mode":"metadata_only","excluded_applications":[],"watched_folders":[],"screenshots_enabled":false}"#).unwrap();
         assert!(settings.excluded_paths.is_empty());
+        assert!(settings.keyboard_text_allowlist.is_empty());
     }
 }
