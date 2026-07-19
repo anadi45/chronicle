@@ -131,6 +131,7 @@ impl Database {
             .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))
     }
 
+    #[allow(dead_code)]
     pub fn enqueue_task(&self, task: &QueueTask) -> Result<()> {
         let pending: i64 = self.connection.query_row("SELECT COUNT(*) FROM processing_queue WHERE status = 'pending'", [], |row| row.get(0))?;
         if pending >= MAX_PENDING_TASKS as i64 {
@@ -226,6 +227,7 @@ impl Database {
         self.connection.query_row("SELECT id, raw_event_id, category, summary, entities_json, relationships_json, confidence, model_name, model_version, created_at FROM semantic_events WHERE raw_event_id = ?1 ORDER BY created_at DESC LIMIT 1", [raw_event_id], |row| Ok(SemanticEvent { id: row.get(0)?, raw_event_id: row.get(1)?, category: row.get(2)?, summary: row.get(3)?, entities_json: row.get(4)?, relationships_json: row.get(5)?, confidence: row.get(6)?, model_name: row.get(7)?, model_version: row.get(8)?, created_at: row.get(9)? })).optional()
     }
 
+    #[allow(dead_code)]
     pub fn insert_embedding(
         &self,
         semantic_event_id: &str,
@@ -237,6 +239,7 @@ impl Database {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn search_embeddings(&self, query: &[f32], limit: usize) -> Result<Vec<(String, f32)>> {
         let mut statement = self
             .connection
@@ -257,6 +260,7 @@ impl Database {
         Ok(scored)
     }
 
+    #[allow(dead_code)]
     pub fn hybrid_rank(&self, text_ids: &[String], vector_scores: &[(String, f32)], limit: usize) -> Vec<String> {
         let text_rank: HashMap<&String, f32> = text_ids.iter().enumerate().map(|(index, id)| (id, 1.0 / (index as f32 + 1.0))).collect();
         let vector_rank: HashMap<&String, f32> = vector_scores.iter().map(|(id, score)| (id, *score)).collect();
@@ -318,6 +322,7 @@ fn map_event(row: &rusqlite::Row<'_>) -> Result<RawEvent> {
     })
 }
 
+#[allow(dead_code)]
 fn cosine_similarity(left: &[f32], right: &[f32]) -> f32 {
     let dot: f32 = left.iter().zip(right).map(|(a, b)| a * b).sum();
     let left_norm = left.iter().map(|value| value * value).sum::<f32>().sqrt();
