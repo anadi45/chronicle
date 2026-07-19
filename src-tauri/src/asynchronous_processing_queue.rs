@@ -17,15 +17,16 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 pub const MAX_RETRY_ATTEMPTS: u32 = 3;
 pub const MAX_PENDING_TASKS: u32 = 10_000;
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct ProcessingMetrics { pub completed: u64, pub failed: u64, pub panicked: u64, pub total_latency_ms: u128 }
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct ProcessingMetrics { pub completed: u64, pub failed: u64, pub panicked: u64, pub total_latency_ms: u128, pub last_model_name: Option<String>, pub last_model_version: Option<String> }
 impl ProcessingMetrics {
-    pub fn snapshot(&self) -> Self { *self }
+    pub fn snapshot(&self) -> Self { self.clone() }
     pub fn reset(&mut self) { *self = Self::default(); }
     pub fn record_completed(&mut self) { self.completed += 1; }
     pub fn record_completed_with_latency(&mut self, latency: Duration) { self.record_completed(); self.total_latency_ms += latency.as_millis(); }
     pub fn record_failed(&mut self) { self.failed += 1; }
     pub fn record_panicked(&mut self) { self.panicked += 1; }
+    pub fn record_model(&mut self, name: impl Into<String>, version: impl Into<String>) { self.last_model_name = Some(name.into()); self.last_model_version = Some(version.into()); }
     pub fn average_latency_ms(&self) -> Option<f64> { (self.completed > 0).then(|| self.total_latency_ms as f64 / self.completed as f64) }
 }
 
@@ -133,9 +134,9 @@ mod tests {
     #[test]
     fn processing_metrics_start_empty() {
         let mut metrics = ProcessingMetrics::default();
-        metrics.record_completed_with_latency(Duration::from_millis(25)); metrics.record_failed(); metrics.record_panicked();
+        metrics.record_completed_with_latency(Duration::from_millis(25)); metrics.record_failed(); metrics.record_panicked(); metrics.record_model("test-model", "1");
         assert_eq!(metrics.average_latency_ms(), Some(25.0));
-        assert_eq!(metrics.snapshot(), ProcessingMetrics { completed: 1, failed: 1, panicked: 1, total_latency_ms: 25 });
+        assert_eq!(metrics.snapshot(), ProcessingMetrics { completed: 1, failed: 1, panicked: 1, total_latency_ms: 25, last_model_name: Some("test-model".into()), last_model_version: Some("1".into()) });
         metrics.reset();
         assert_eq!(metrics, ProcessingMetrics::default());
         assert_eq!(metrics.average_latency_ms(), None);

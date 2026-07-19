@@ -101,6 +101,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [x] Add processing latency/error metrics contract
 - [x] Add processing metrics snapshot/reset operations
 - [x] Add average processing latency accessor
+- [x] Add processing model metadata fields
 - [x] Ensure AI failures never stop capture
 - [~] Add Nomic Embed Text provider
 - [~] Add sqlite-vec storage and similarity search
