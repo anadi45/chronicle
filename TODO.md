@@ -71,7 +71,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [x] Keep image bytes in memory only by default
 - [x] Associate transient assets with raw events/queue tasks
 - [x] Release assets after processing or failure
-- [ ] Add disabled debug-retention mode
+- [x] Keep debug screenshot retention disabled by default
 - [x] Add screenshot privacy and failure tests
 - [x] Add transient screenshot expiry test
 

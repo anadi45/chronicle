@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 use std::collections::HashMap;
 
+pub const DEFAULT_SCREENSHOT_RETENTION: Duration = Duration::from_secs(30);
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ScreenshotTrigger {
@@ -61,6 +63,7 @@ impl TransientScreenshotStore {
     pub fn associate_queue_task(&mut self, raw_event_id: &str, queue_task_id: String) -> bool { if let Some(asset) = self.assets.get_mut(raw_event_id) { asset.queue_task_id = Some(queue_task_id); true } else { false } }
     pub fn take(&mut self, raw_event_id: &str) -> Option<TransientScreenshotAsset> { self.assets.remove(raw_event_id) }
     pub fn purge_expired(&mut self, retention: Duration) { self.assets.retain(|_, asset| !asset.expired(retention)); }
+    pub fn purge_default_retention(&mut self) { self.purge_expired(DEFAULT_SCREENSHOT_RETENTION); }
     pub fn len(&self) -> usize { self.assets.len() }
 }
 
@@ -113,5 +116,10 @@ mod tests {
         assert!(!store.insert(TransientScreenshotAsset::new("empty".into(), vec![], "image/png")));
         assert!(!store.insert(TransientScreenshotAsset::new("text".into(), vec![1], "text/plain")));
         assert_eq!(store.len(), 0);
+    }
+
+    #[test]
+    fn default_retention_is_short_and_explicit() {
+        assert_eq!(DEFAULT_SCREENSHOT_RETENTION, Duration::from_secs(30));
     }
 }
