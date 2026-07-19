@@ -63,3 +63,4 @@ Capture and persistence must remain fast and reliable even when local AI inferen
 - The Diagnostics action in the desktop shell reports capture permissions, exclusions, storage counts, queue state, and provider availability.
 - Queue status is available from Diagnostics, including pending, processing, completed, failed, and cancelled task counts.
 - Screenshot requests are restricted to explicit meaningful event triggers and remain memory-only until a native provider supplies image bytes.
+- Semantic model JSON is size-bounded and schema-validated before persistence; the event inspector exposes raw JSON and source evidence without replacing raw records.

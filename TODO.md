@@ -100,7 +100,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [~] Add Gemma provider configuration and model discovery
 - [x] Implement structured text analysis validation boundary
 - [x] Implement image analysis input validation contract
-- [~] Validate model JSON output
+- [x] Validate model JSON output boundary
 - [x] Add processing metrics contract
 - [x] Add processing metrics counters
 - [x] Add processing latency/error metrics contract
@@ -115,7 +115,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 
 ## UI completion
 
-- [~] Event inspector with raw JSON and source evidence
+- [x] Event inspector with raw JSON and source evidence
 - [x] Semantic event persistence and model metadata
 - [x] Queue status view in diagnostics panel
 - [x] Permission diagnostics page
