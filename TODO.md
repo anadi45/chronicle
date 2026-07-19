@@ -44,6 +44,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [x] Enforce allowlist during keyboard event normalization
 - [x] Preserve keyboard allowlist compatibility for existing settings
 - [x] Persist keyboard allowlist in capture settings
+- [x] Add command to configure keyboard text allowlist
 - [x] Add protected-field/password/security exclusions
 - [x] Add protected-field/password/security exclusions for UI Automation
 - [x] Add text batching contract and 500–1000 ms debounce bounds
