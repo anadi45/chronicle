@@ -2,6 +2,7 @@ import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import "./styles.css";
+import "./diagnostics_panel";
 
 type RawEvent = { id: string; timestamp_ns: number; event_type: string; source: string; app_name?: string; window_title?: string; text?: string; privacy_class: string; confidence: number; created_at: string };
 type CaptureSettings = { enabled: boolean; mouse_enabled: boolean; keyboard_enabled: boolean; excluded_applications: string[]; watched_folders: string[]; screenshots_enabled: boolean };

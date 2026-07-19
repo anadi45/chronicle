@@ -56,3 +56,4 @@ Capture and persistence must remain fast and reliable even when local AI inferen
 - Watched-folder capture is limited to explicitly selected folders and records file metadata, not file contents.
 - Export produces local JSON data; delete-all permanently removes local raw, semantic, embedding, and queue records after confirmation.
 - Queue retries are persisted with attempt counts and retry timestamps, so transient failures do not spin continuously after restart.
+- The Diagnostics action in the desktop shell reports capture permissions, exclusions, storage counts, queue state, and provider availability.
