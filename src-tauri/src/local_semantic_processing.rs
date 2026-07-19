@@ -28,6 +28,15 @@ pub fn parse_and_validate_model_json(json: &str) -> Result<SemanticModelOutput, 
     validate_model_output(output)
 }
 
+pub fn validate_image_input(bytes: &[u8]) -> Result<(), String> {
+    if bytes.is_empty() { return Err("image input is empty".into()); }
+    if bytes.len() > 10 * 1024 * 1024 { return Err("image input exceeds 10 MiB".into()); }
+    let png = bytes.starts_with(&[137, 80, 78, 71, 13, 10, 26, 10]);
+    let jpeg = bytes.starts_with(&[255, 216, 255]);
+    if !png && !jpeg { return Err("image input must be PNG or JPEG".into()); }
+    Ok(())
+}
+
 pub fn validate_model_output(output: SemanticModelOutput) -> Result<SemanticModelOutput, String> {
     if output.category.trim().is_empty() {
         return Err("semantic category is empty".into());
@@ -74,5 +83,10 @@ mod tests {
     #[test]
     fn rejects_oversized_model_json() {
         assert!(parse_and_validate_model_json(&"x".repeat(65 * 1024)).is_err());
+    }
+    #[test]
+    fn validates_supported_image_inputs() {
+        assert!(validate_image_input(&[137, 80, 78, 71, 13, 10, 26, 10, 1]).is_ok());
+        assert!(validate_image_input(&[1, 2, 3]).is_err());
     }
 }

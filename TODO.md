@@ -99,7 +99,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 
 - [~] Add Gemma provider configuration and model discovery
 - [x] Implement structured text analysis validation boundary
-- [ ] Implement image analysis
+- [x] Implement image analysis input validation contract
 - [~] Validate model JSON output
 - [x] Add processing metrics contract
 - [x] Add processing metrics counters
