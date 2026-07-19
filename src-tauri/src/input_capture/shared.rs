@@ -33,7 +33,14 @@ pub struct InputCaptureSettings {
     pub mouse_enabled: bool,
     pub keyboard_enabled: bool,
     pub capture_keyboard_text: bool,
+    pub keyboard_text_allowlist: Vec<String>,
     pub excluded_applications: Vec<String>,
+}
+
+impl InputCaptureSettings {
+    pub fn allows_keyboard_text(&self, app_name: &str) -> bool {
+        self.capture_keyboard_text && self.keyboard_text_allowlist.iter().any(|allowed| allowed.eq_ignore_ascii_case(app_name))
+    }
 }
 
 pub fn normalize_mouse_event(
@@ -112,5 +119,11 @@ mod tests {
         batcher.push("a"); batcher.push("b");
         assert!(batcher.flush_if_due(Duration::ZERO).is_none());
         assert!(batcher.flush_if_due(MAX_TEXT_BATCH_DEBOUNCE).is_none());
+    }
+    #[test]
+    fn keyboard_text_requires_explicit_allowlisted_application() {
+        let settings = InputCaptureSettings { capture_keyboard_text: true, keyboard_text_allowlist: vec!["Editor".into()], ..Default::default() };
+        assert!(settings.allows_keyboard_text("editor"));
+        assert!(!settings.allows_keyboard_text("Browser"));
     }
 }

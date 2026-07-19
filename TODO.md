@@ -40,7 +40,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [x] Add Windows low-level keyboard hook worker
 - [x] Add normalized keyboard/mouse event contracts and privacy metadata
 - [x] Persist independent keyboard/mouse permission settings
-- [ ] Implement allowlisted text capture
+- [x] Implement allowlisted text capture contract
 - [x] Add protected-field/password/security exclusions
 - [x] Add protected-field/password/security exclusions for UI Automation
 - [x] Add text batching contract and 500–1000 ms debounce bounds
