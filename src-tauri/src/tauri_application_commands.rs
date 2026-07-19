@@ -5,7 +5,7 @@
 //! work is launched in a background thread so invoke handlers stay responsive.
 
 use crate::activity_capture::CaptureSettings;
-use crate::asynchronous_processing_queue::{MAX_PENDING_TASKS, MAX_RETRY_ATTEMPTS, QueueTask, QueueStatus, TaskType, LocalModelQueueProcessor, run_processing_worker};
+use crate::asynchronous_processing_queue::{MAX_PENDING_TASKS, MAX_RETRY_ATTEMPTS, LocalModelQueueProcessor, run_processing_worker};
 use serde::Serialize;
 use crate::local_sqlite_event_database::{Database, RawEvent, SemanticEvent, SemanticEventView};
 use std::sync::Mutex;
@@ -107,14 +107,12 @@ pub fn list_semantic_events(
 
 #[tauri::command]
 pub fn record_event(state: State<'_, AppState>, event: RawEvent) -> Result<(), String> {
-    let event_id = event.id.clone();
     state
         .database
         .lock()
         .map_err(|_| "database lock poisoned".to_owned())?
-        .insert_event(&event)
-        .map_err(|error| error.to_string())?;
-    state.database.lock().map_err(|_| "database lock poisoned".to_owned())?.enqueue_task(&QueueTask { id: uuid::Uuid::new_v4().to_string(), raw_event_id: event_id, task_type: TaskType::SemanticTextAnalysis, status: QueueStatus::Pending, attempts: 0, priority: 0 }).map_err(|error| error.to_string())
+        .insert_event_and_enqueue(&event)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]

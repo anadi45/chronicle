@@ -165,7 +165,7 @@ pub fn start_foreground_loop(
                     event.event_type = event_type.into();
                     event.metadata_json = format!("{{\"window_handle\":{handle}}}");
                     if let Ok(database) = database.lock() {
-                        let _ = database.insert_event(&event);
+                        let _ = database.insert_event_and_enqueue(&event);
                     }
                     previous = Some((handle, title));
                 }

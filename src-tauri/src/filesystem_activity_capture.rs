@@ -105,7 +105,7 @@ fn persist(database: &Arc<Mutex<Database>>, event_type: &str, path: &str, modifi
         created_at: Utc::now().to_rfc3339(),
     };
     if let Ok(database) = database.lock() {
-        let _ = database.insert_event(&event);
+        let _ = database.insert_event_and_enqueue(&event);
     }
 }
 
