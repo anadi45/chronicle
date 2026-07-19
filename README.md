@@ -46,6 +46,8 @@ The Tauri CLI and Windows WebView2 are required for the desktop run. Database fi
 
 Production bundles are enabled in `src-tauri/tauri.conf.json` and use the checked-in platform icon assets.
 
+Run `powershell -ExecutionPolicy Bypass -File scripts/release-smoke.ps1` on Windows to validate frontend checks, Rust tests, production build, and NSIS packaging together.
+
 ## Privacy invariant
 
 Capture and persistence must remain fast and reliable even when local AI inference is slow or unavailable. Keyboard capture will be opt-in and privacy exclusions will be implemented before enabling global hooks.
