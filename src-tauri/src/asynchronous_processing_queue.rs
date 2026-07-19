@@ -15,6 +15,7 @@ use std::time::Duration;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 pub const MAX_RETRY_ATTEMPTS: u32 = 3;
+pub const MAX_PENDING_TASKS: u32 = 10_000;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct ProcessingMetrics { pub completed: u64, pub failed: u64, pub panicked: u64, pub total_latency_ms: u128 }

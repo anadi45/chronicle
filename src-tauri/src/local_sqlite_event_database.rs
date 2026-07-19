@@ -5,6 +5,7 @@
 //! is maintained from raw-event triggers so search remains useful without AI.
 
 use crate::asynchronous_processing_queue::{QueueStatus, QueueTask, TaskType};
+use crate::asynchronous_processing_queue::MAX_PENDING_TASKS;
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension, Result};
 use serde::{Deserialize, Serialize};
@@ -132,7 +133,7 @@ impl Database {
 
     pub fn enqueue_task(&self, task: &QueueTask) -> Result<()> {
         let pending: i64 = self.connection.query_row("SELECT COUNT(*) FROM processing_queue WHERE status = 'pending'", [], |row| row.get(0))?;
-        if pending >= 10_000 {
+        if pending >= MAX_PENDING_TASKS as i64 {
             return Err(rusqlite::Error::InvalidQuery);
         }
         self.connection.execute("INSERT INTO processing_queue (id, raw_event_id, task_type, status, priority, attempts, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))", params![task.id, task.raw_event_id, serde_json::to_string(&task.task_type).unwrap_or_default().trim_matches('"'), serde_json::to_string(&task.status).unwrap_or_default().trim_matches('"'), task.priority, task.attempts])?;

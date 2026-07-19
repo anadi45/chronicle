@@ -119,6 +119,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [x] Add storage usage command
 - [x] Add model/provider status command
 - [x] Add processing queue limits command
+- [x] Centralize processing queue limits
 
 ## Hardening and release
 

@@ -5,7 +5,7 @@
 //! work is launched in a background thread so invoke handlers stay responsive.
 
 use crate::activity_capture::CaptureSettings;
-use crate::asynchronous_processing_queue::MAX_RETRY_ATTEMPTS;
+use crate::asynchronous_processing_queue::{MAX_PENDING_TASKS, MAX_RETRY_ATTEMPTS};
 use serde::Serialize;
 use crate::local_sqlite_event_database::{Database, RawEvent, SemanticEvent};
 use std::sync::Mutex;
@@ -399,7 +399,7 @@ pub fn model_provider_status() -> ModelProviderStatus {
 pub struct ProcessingQueueLimits { pub max_retry_attempts: u32, pub max_pending_tasks: u32 }
 
 #[tauri::command]
-pub fn processing_queue_limits() -> ProcessingQueueLimits { ProcessingQueueLimits { max_retry_attempts: MAX_RETRY_ATTEMPTS, max_pending_tasks: 10_000 } }
+pub fn processing_queue_limits() -> ProcessingQueueLimits { ProcessingQueueLimits { max_retry_attempts: MAX_RETRY_ATTEMPTS, max_pending_tasks: MAX_PENDING_TASKS } }
 
 #[tauri::command]
 pub fn cancel_pending_processing_tasks(state: State<'_, AppState>) -> Result<usize, String> {
