@@ -33,6 +33,7 @@ pub struct InputCaptureSettings {
     pub mouse_enabled: bool,
     pub keyboard_enabled: bool,
     pub capture_keyboard_text: bool,
+    #[serde(default)]
     pub keyboard_text_allowlist: Vec<String>,
     pub excluded_applications: Vec<String>,
 }
@@ -142,5 +143,11 @@ mod tests {
         let settings = InputCaptureSettings { capture_keyboard_text: true, keyboard_text_allowlist: vec!["Editor".into()], ..Default::default() };
         let event = normalize_allowlisted_keyboard_event(&settings, "key_down", 65, Some("Browser".into()), Some("secret".into()));
         assert!(event.text.is_none());
+    }
+    #[test]
+    fn legacy_input_settings_have_no_text_allowlist() {
+        let settings: InputCaptureSettings = serde_json::from_str(r#"{"mouse_enabled":false,"keyboard_enabled":true,"capture_keyboard_text":false,"excluded_applications":[]}"#).unwrap();
+        assert!(settings.keyboard_text_allowlist.is_empty());
+        assert!(!settings.allows_keyboard_text("Editor"));
     }
 }
