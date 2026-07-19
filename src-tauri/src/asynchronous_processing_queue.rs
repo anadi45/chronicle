@@ -158,7 +158,9 @@ mod tests {
         let worker = run_processing_worker(database.clone(), stop.clone(), processor.clone());
         std::thread::sleep(Duration::from_millis(5));
         database.lock().unwrap().insert_event(&RawEvent { id: "capture-while-busy".into(), timestamp_ns: 2, event_type: "window_focused".into(), source: "foreground_window".into(), app_name: Some("Editor".into()), executable_path: None, process_id: None, window_handle: None, window_title: Some("Notes".into()), element_name: None, text: None, file_path: None, metadata_json: "{}".into(), privacy_class: "metadata".into(), confidence: 1.0, created_at: "2026-01-01T00:00:01Z".into() }).unwrap();
+        let processing_started = std::time::Instant::now();
         std::thread::sleep(Duration::from_millis(50)); stop.store(true, Ordering::Relaxed); worker.join().unwrap();
+        assert!(processing_started.elapsed() < Duration::from_secs(2));
         assert_eq!(processor.calls.load(Ordering::Relaxed), 1);
         assert_eq!(database.lock().unwrap().count_events().unwrap(), 2);
         assert_eq!(database.lock().unwrap().queue_counts().unwrap().get("complete"), Some(&1));

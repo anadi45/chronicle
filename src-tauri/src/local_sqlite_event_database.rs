@@ -489,7 +489,9 @@ mod tests {
     #[test]
     fn persists_one_thousand_events_without_losing_count() {
         let database = Database::in_memory().unwrap();
+        let started = std::time::Instant::now();
         for index in 0..1_000 { database.insert_event(&event(&format!("bulk-{index}"), index, "Bulk", None)).unwrap(); }
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
         assert_eq!(database.count_events().unwrap(), 1_000);
         assert_eq!(database.recent_events(10, None).unwrap().len(), 10);
     }
