@@ -7,7 +7,7 @@
 use crate::activity_capture::CaptureSettings;
 use crate::asynchronous_processing_queue::{MAX_PENDING_TASKS, MAX_RETRY_ATTEMPTS};
 use serde::Serialize;
-use crate::local_sqlite_event_database::{Database, RawEvent, SemanticEvent};
+use crate::local_sqlite_event_database::{Database, RawEvent, SemanticEvent, SemanticEventView};
 use std::sync::Mutex;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -92,6 +92,16 @@ pub fn list_events(
         .map_err(|_| "database lock poisoned".to_owned())?
         .recent_events(limit.clamp(1, 500), query.as_deref())
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn list_semantic_events(
+    state: State<'_, AppState>,
+    limit: u32,
+    query: Option<String>,
+) -> Result<Vec<SemanticEventView>, String> {
+    state.database.lock().map_err(|_| "database lock poisoned".to_owned())?
+        .recent_semantic_events(limit.clamp(1, 500), query.as_deref()).map_err(|error| error.to_string())
 }
 
 #[tauri::command]

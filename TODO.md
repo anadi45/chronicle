@@ -115,6 +115,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 
 ## UI completion
 
+- [x] Hide raw capture events from Timeline/Search; show only persisted LLM-processed insights
 - [x] Event inspector with raw JSON and source evidence
 - [x] Semantic event persistence and model metadata
 - [x] Queue status view in diagnostics panel

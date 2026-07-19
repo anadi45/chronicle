@@ -33,6 +33,7 @@ pub fn run() {
             tauri_application_commands::health_check,
             tauri_application_commands::recent_event_count,
             tauri_application_commands::list_events,
+            tauri_application_commands::list_semantic_events,
             tauri_application_commands::record_event,
             tauri_application_commands::record_semantic_event,
             tauri_application_commands::semantic_for_event,

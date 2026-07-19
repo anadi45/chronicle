@@ -9,6 +9,7 @@ Chronicle is a Windows-first, local-first computer memory engine. It persists ra
 - SQLite raw-event repository with FTS5 search triggers
 - Tauri commands for listing, searching, recording, counting, and deleting events
 - Live Timeline, Search, and privacy/settings views
+- Timeline and Search display only processed semantic insights; raw capture evidence remains internal to persistence and processing
 - Seed event for first-run health verification
 - Capture provider contracts and privacy-safe defaults
 - Processing Queue task/status contracts with exponential retry policy

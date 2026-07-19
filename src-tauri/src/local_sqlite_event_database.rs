@@ -45,6 +45,20 @@ pub struct SemanticEvent {
     pub created_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SemanticEventView {
+    pub id: String,
+    pub raw_event_id: String,
+    pub timestamp_ns: i64,
+    pub app_name: Option<String>,
+    pub window_title: Option<String>,
+    pub category: String,
+    pub summary: String,
+    pub confidence: f32,
+    pub model_name: String,
+    pub created_at: String,
+}
+
 pub struct Database {
     connection: Connection,
 }
@@ -101,6 +115,21 @@ impl Database {
         } else {
             statement.query_map(params![limit], map_event)?
         };
+        rows.collect()
+    }
+
+    pub fn recent_semantic_events(&self, limit: u32, query: Option<&str>) -> Result<Vec<SemanticEventView>> {
+        let pattern = query.map(|value| format!("%{}%", value.replace('%', "\\%").replace('_', "\\_")));
+        let mut statement = self.connection.prepare(
+            "SELECT s.id, s.raw_event_id, r.timestamp_ns, r.app_name, r.window_title, s.category, s.summary, s.confidence, s.model_name, s.created_at
+             FROM semantic_events s JOIN raw_events r ON r.id = s.raw_event_id
+             WHERE (?1 IS NULL OR s.summary LIKE ?1 ESCAPE '\\' OR s.category LIKE ?1 ESCAPE '\\')
+             ORDER BY s.created_at DESC LIMIT ?2")?;
+        let rows = statement.query_map(params![pattern, limit], |row| Ok(SemanticEventView {
+            id: row.get(0)?, raw_event_id: row.get(1)?, timestamp_ns: row.get(2)?,
+            app_name: row.get(3)?, window_title: row.get(4)?, category: row.get(5)?,
+            summary: row.get(6)?, confidence: row.get(7)?, model_name: row.get(8)?, created_at: row.get(9)?,
+        }))?;
         rows.collect()
     }
 
