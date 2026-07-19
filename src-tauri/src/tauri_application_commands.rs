@@ -15,6 +15,7 @@ use std::sync::{
 };
 use std::thread::JoinHandle;
 use tauri::State;
+use crate::local_model_provider::{LocalModelStatus, OllamaLocalModelProvider};
 
 pub struct AppState {
     pub database: Arc<Mutex<Database>>,
@@ -408,12 +409,10 @@ pub fn storage_usage(state: State<'_, AppState>) -> Result<std::collections::Has
 }
 
 #[derive(Debug, Serialize)]
-pub struct ModelProviderStatus { pub semantic_provider: String, pub embedding_provider: String, pub semantic_available: bool, pub embedding_available: bool }
+pub struct ModelProviderStatus { pub semantic_provider: String, pub embedding_provider: String, pub semantic_available: bool, pub embedding_available: bool, pub local_models: LocalModelStatus }
 
 #[tauri::command]
-pub fn model_provider_status() -> ModelProviderStatus {
-    ModelProviderStatus { semantic_provider: "local-contract".into(), embedding_provider: "sqlite-fallback".into(), semantic_available: false, embedding_available: true }
-}
+pub fn model_provider_status() -> ModelProviderStatus { let provider = OllamaLocalModelProvider::default(); let local_models = provider.status(); ModelProviderStatus { semantic_provider: format!("Ollama/Gemma ({})", local_models.gemma_model), embedding_provider: format!("Ollama/Nomic ({})", local_models.nomic_model), semantic_available: local_models.gemma_available, embedding_available: local_models.nomic_available, local_models } }
 
 #[derive(Debug, Serialize)]
 pub struct ProcessingQueueLimits { pub max_retry_attempts: u32, pub max_pending_tasks: u32 }

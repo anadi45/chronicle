@@ -9,6 +9,7 @@ mod filesystem_activity_capture;
 mod input_capture;
 #[allow(dead_code)]
 mod local_semantic_processing;
+mod local_model_provider;
 mod local_sqlite_event_database;
 mod tauri_application_commands;
 #[allow(dead_code)]

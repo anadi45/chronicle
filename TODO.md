@@ -97,7 +97,8 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 
 ## Local AI and semantic events
 
-- [~] Add Gemma provider configuration and model discovery
+- [x] Add Gemma provider configuration and Ollama model discovery
+- [~] Wire Gemma/Nomic provider calls into queue tasks and persist outputs
 - [x] Implement structured text analysis validation boundary
 - [x] Implement image analysis input validation contract
 - [x] Validate model JSON output boundary
@@ -108,7 +109,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [x] Add average processing latency accessor
 - [x] Add processing model metadata fields
 - [x] Ensure AI failures never stop capture
-- [~] Add Nomic Embed Text provider
+- [x] Add Nomic Embed Text provider adapter
 - [~] Add sqlite-vec storage and similarity search
 - [~] Add durable embedding storage fallback
 - [x] Add hybrid FTS5/vector ranking
