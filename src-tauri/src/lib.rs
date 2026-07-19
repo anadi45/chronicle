@@ -52,6 +52,7 @@ pub fn run() {
             tauri_application_commands::storage_usage,
             tauri_application_commands::model_provider_status,
             tauri_application_commands::processing_queue_limits,
+            tauri_application_commands::capture_diagnostics,
             tauri_application_commands::cancel_pending_processing_tasks,
             tauri_application_commands::processing_status_for_event
         ])

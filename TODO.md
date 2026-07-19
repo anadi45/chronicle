@@ -119,6 +119,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [x] Semantic event persistence and model metadata
 - [ ] Queue status page
 - [ ] Permission diagnostics page
+- [x] Add consolidated permission diagnostics command
 - [x] Watched-folder and excluded-application editors
 - [x] Wire export button to browser download
 - [x] Wire delete-all button with confirmation

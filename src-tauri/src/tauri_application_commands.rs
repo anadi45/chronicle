@@ -411,6 +411,17 @@ pub struct ProcessingQueueLimits { pub max_retry_attempts: u32, pub max_pending_
 #[tauri::command]
 pub fn processing_queue_limits() -> ProcessingQueueLimits { ProcessingQueueLimits { max_retry_attempts: MAX_RETRY_ATTEMPTS, max_pending_tasks: MAX_PENDING_TASKS } }
 
+#[derive(Debug, Serialize)]
+pub struct CaptureDiagnostics { pub settings: CaptureSettings, pub storage: std::collections::HashMap<String, i64>, pub queue: ProcessingQueueStatus, pub providers: ModelProviderStatus }
+
+#[tauri::command]
+pub fn capture_diagnostics(state: State<'_, AppState>) -> Result<CaptureDiagnostics, String> {
+    let settings = state.settings.lock().map_err(|_| "settings lock poisoned".to_owned())?.clone();
+    let database = state.database.lock().map_err(|_| "database lock poisoned".to_owned())?;
+    let counts = database.queue_counts().map_err(|error| error.to_string())?;
+    Ok(CaptureDiagnostics { settings, storage: database.storage_counts().map_err(|error| error.to_string())?, queue: ProcessingQueueStatus { pending: *counts.get("pending").unwrap_or(&0), processing: *counts.get("processing").unwrap_or(&0), complete: *counts.get("complete").unwrap_or(&0), failed: *counts.get("failed").unwrap_or(&0), cancelled: *counts.get("cancelled").unwrap_or(&0) }, providers: model_provider_status() })
+}
+
 #[tauri::command]
 pub fn cancel_pending_processing_tasks(state: State<'_, AppState>) -> Result<usize, String> {
     state.database.lock().map_err(|_| "database lock poisoned".to_owned())?.cancel_pending_tasks().map_err(|error| error.to_string())
