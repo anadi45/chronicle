@@ -117,6 +117,8 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [x] Wire export button to browser download
 - [x] Wire delete-all button with confirmation
 - [x] Add storage usage command
+- [x] Add model/provider status command
+- [x] Add processing queue limits command
 
 ## Hardening and release
 

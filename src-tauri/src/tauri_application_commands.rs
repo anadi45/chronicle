@@ -5,6 +5,8 @@
 //! work is launched in a background thread so invoke handlers stay responsive.
 
 use crate::activity_capture::CaptureSettings;
+use crate::asynchronous_processing_queue::MAX_RETRY_ATTEMPTS;
+use serde::Serialize;
 use crate::local_sqlite_event_database::{Database, RawEvent, SemanticEvent};
 use std::sync::Mutex;
 use std::sync::{
@@ -384,6 +386,20 @@ pub fn processing_queue_status(
 pub fn storage_usage(state: State<'_, AppState>) -> Result<std::collections::HashMap<String, i64>, String> {
     state.database.lock().map_err(|_| "database lock poisoned".to_owned())?.storage_counts().map_err(|error| error.to_string())
 }
+
+#[derive(Debug, Serialize)]
+pub struct ModelProviderStatus { pub semantic_provider: String, pub embedding_provider: String, pub semantic_available: bool, pub embedding_available: bool }
+
+#[tauri::command]
+pub fn model_provider_status() -> ModelProviderStatus {
+    ModelProviderStatus { semantic_provider: "local-contract".into(), embedding_provider: "sqlite-fallback".into(), semantic_available: false, embedding_available: true }
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProcessingQueueLimits { pub max_retry_attempts: u32, pub max_pending_tasks: u32 }
+
+#[tauri::command]
+pub fn processing_queue_limits() -> ProcessingQueueLimits { ProcessingQueueLimits { max_retry_attempts: MAX_RETRY_ATTEMPTS, max_pending_tasks: 10_000 } }
 
 #[tauri::command]
 pub fn cancel_pending_processing_tasks(state: State<'_, AppState>) -> Result<usize, String> {
