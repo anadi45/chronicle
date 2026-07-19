@@ -22,6 +22,12 @@ pub trait LocalSemanticAnalyzer: Send + Sync {
     fn analyze_image(&self, bytes: &[u8]) -> Result<SemanticModelOutput, String>;
 }
 
+pub fn parse_and_validate_model_json(json: &str) -> Result<SemanticModelOutput, String> {
+    if json.len() > 64 * 1024 { return Err("semantic model output exceeds 64 KiB".into()); }
+    let output: SemanticModelOutput = serde_json::from_str(json).map_err(|error| format!("invalid semantic model JSON: {error}"))?;
+    validate_model_output(output)
+}
+
 pub fn validate_model_output(output: SemanticModelOutput) -> Result<SemanticModelOutput, String> {
     if output.category.trim().is_empty() {
         return Err("semantic category is empty".into());
@@ -59,5 +65,14 @@ mod tests {
             confidence: 2.0
         })
         .is_err());
+    }
+    #[test]
+    fn parses_structured_model_json() {
+        let output = parse_and_validate_model_json(r#"{"category":"work","summary":"Edited a file","confidence":0.7}"#).unwrap();
+        assert_eq!(output.category, "work");
+    }
+    #[test]
+    fn rejects_oversized_model_json() {
+        assert!(parse_and_validate_model_json(&"x".repeat(65 * 1024)).is_err());
     }
 }

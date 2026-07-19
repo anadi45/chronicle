@@ -98,7 +98,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 ## Local AI and semantic events
 
 - [~] Add Gemma provider configuration and model discovery
-- [~] Implement structured text analysis
+- [x] Implement structured text analysis validation boundary
 - [ ] Implement image analysis
 - [~] Validate model JSON output
 - [x] Add processing metrics contract
