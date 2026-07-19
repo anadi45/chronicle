@@ -495,6 +495,16 @@ mod tests {
     }
 
     #[test]
+    fn fts_search_has_bounded_latency_at_one_thousand_events() {
+        let database = Database::in_memory().unwrap();
+        for index in 0..1_000 { database.insert_event(&event(&format!("search-{index}"), index, if index == 777 { "UniqueSearchMarker" } else { "Background" }, None)).unwrap(); }
+        let started = std::time::Instant::now();
+        let results = database.recent_events(25, Some("UniqueSearchMarker")).unwrap();
+        assert!(!results.is_empty());
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    }
+
+    #[test]
     fn stale_processing_tasks_are_requeued() {
         let database = Database::in_memory().unwrap();
         database

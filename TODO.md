@@ -131,7 +131,8 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 ## Hardening and release
 
 - [ ] Add end-to-end Windows capture tests
-- [ ] Benchmark raw persistence, screenshot capture, queue latency, and search
+- [~] Benchmark raw persistence, screenshot capture, queue latency, and search
+- [x] Add bounded FTS search baseline at 1,000 events
 - [x] Test 1,000+ events and memory growth baseline
 - [x] Test forced termination and queue recovery
 - [ ] Test elevated apps, UAC, secure desktop, protected windows, and games
