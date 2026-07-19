@@ -74,3 +74,4 @@ npm run build
 - State the active implementation task before editing.
 - Report meaningful blockers with evidence and the smallest safe alternative.
 - Be explicit about what is implemented, what is an interface only, and what remains machine-specific.
+- For implementation requests, prefer completing one cohesive feature area end-to-end—backend contracts, UI integration, tests, TODO updates, and README updates—before moving to the next feature. Avoid substituting a series of unrelated micro-tasks for a larger requested feature.
