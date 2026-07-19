@@ -98,7 +98,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 ## Local AI and semantic events
 
 - [x] Add Gemma provider configuration and Ollama model discovery
-- [~] Wire Gemma/Nomic provider calls into queue tasks and persist outputs
+- [x] Wire Gemma/Nomic provider calls into queue tasks and persist outputs
 - [x] Implement structured text analysis validation boundary
 - [x] Implement image analysis input validation contract
 - [x] Validate model JSON output boundary

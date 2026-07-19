@@ -13,6 +13,11 @@ use std::sync::{
 use std::thread;
 use std::time::Duration;
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use crate::local_model_provider::OllamaLocalModelProvider;
+use crate::embedding_provider::TextEmbedder;
+use crate::local_sqlite_event_database::SemanticEvent;
+use chrono::Utc;
+use uuid::Uuid;
 
 pub const MAX_RETRY_ATTEMPTS: u32 = 3;
 pub const MAX_PENDING_TASKS: u32 = 10_000;
@@ -69,6 +74,22 @@ pub fn retry_delay(attempt: u32) -> Duration {
 pub trait QueueTaskProcessor: Send + Sync {
     fn process(&self, task: &QueueTask) -> Result<(), String>;
 }
+
+pub struct LocalModelQueueProcessor { pub database: Arc<Mutex<Database>> }
+impl QueueTaskProcessor for LocalModelQueueProcessor {
+    fn process(&self, task: &QueueTask) -> Result<(), String> {
+        let provider = OllamaLocalModelProvider::default();
+        let database = self.database.clone();
+        let event = database.lock().map_err(|_| "database lock poisoned")?.event_by_id(&task.raw_event_id).map_err(|e| e.to_string())?.ok_or("raw event not found")?;
+        let context = format!("application: {:?}\nwindow: {:?}\nevent: {}\ntext: {:?}", event.app_name, event.window_title, event.event_type, event.text);
+        match task.task_type {
+            TaskType::SemanticTextAnalysis => { let output = provider.analyze_text(&context)?; let semantic_id = Uuid::new_v4().to_string(); database.lock().map_err(|_| "database lock poisoned")?.insert_semantic_event(&SemanticEvent { id: semantic_id, raw_event_id: task.raw_event_id.clone(), category: output.category, summary: output.summary, entities_json: serde_json::to_string(&output.entities).unwrap_or_default(), relationships_json: serde_json::to_string(&output.relationships).unwrap_or_default(), confidence: output.confidence, model_name: provider.gemma_model.clone(), model_version: "ollama".into(), created_at: Utc::now().to_rfc3339() }).map_err(|e| e.to_string())?; database.lock().map_err(|_| "database lock poisoned")?.enqueue_task(&QueueTask { id: Uuid::new_v4().to_string(), raw_event_id: task.raw_event_id.clone(), task_type: TaskType::EmbeddingGeneration, status: QueueStatus::Pending, attempts: 0, priority: -1 }).map_err(|e| e.to_string())?; Ok(()) }
+            TaskType::EmbeddingGeneration => { let embedding = provider.embed(&context)?; let semantic_id = database.lock().map_err(|_| "database lock poisoned")?.semantic_for_raw_event(&task.raw_event_id).map_err(|e| e.to_string())?.ok_or("semantic event not found")?.id; database.lock().map_err(|_| "database lock poisoned")?.insert_embedding(&semantic_id, &provider.nomic_model, "ollama", &embedding).map_err(|e| e.to_string()) }
+            TaskType::SemanticImageAnalysis => Err("image processing is not wired to a native image provider".into()),
+        }
+    }
+}
+
 
 pub fn run_processing_worker(
     database: Arc<Mutex<Database>>,

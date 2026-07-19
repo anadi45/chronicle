@@ -19,6 +19,7 @@ Chronicle is a Windows-first, local-first computer memory engine. It persists ra
 The concrete Windows hooks, Processing Queue workers, screenshots, local model runtimes, embeddings, and installer hardening are still in progress. Settings persistence and export are now available through the backend commands.
 
 Local model discovery uses the Ollama-compatible API at `http://127.0.0.1:11434` by default. Set `CHRONICLE_OLLAMA_ENDPOINT`, `CHRONICLE_GEMMA_MODEL`, and `CHRONICLE_NOMIC_MODEL` to configure local models.
+Captured events enqueue local Gemma analysis followed by Nomic embedding generation. If Ollama or either model is unavailable, queue retries are used and capture continues.
 
 ## Development
 
