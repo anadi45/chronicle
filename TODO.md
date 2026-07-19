@@ -135,7 +135,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [x] Test 1,000+ events and memory growth baseline
 - [x] Test forced termination and queue recovery
 - [ ] Test elevated apps, UAC, secure desktop, protected windows, and games
-- [ ] Add Windows installer icon/resources
+- [x] Add Windows installer icon/resources
 - [ ] Test Windows Defender/antivirus interactions
 - [x] Document permissions and privacy behavior
 - [x] Document current permissions and privacy behavior

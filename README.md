@@ -44,6 +44,8 @@ If the Rust build succeeds but the app exits with `0xc0000139 (STATUS_ENTRYPOINT
 
 The Tauri CLI and Windows WebView2 are required for the desktop run. Database files are created beside the application process during development and are excluded from version control.
 
+Production bundles are enabled in `src-tauri/tauri.conf.json` and use the checked-in platform icon assets.
+
 ## Privacy invariant
 
 Capture and persistence must remain fast and reliable even when local AI inference is slow or unavailable. Keyboard capture will be opt-in and privacy exclusions will be implemented before enabling global hooks.
