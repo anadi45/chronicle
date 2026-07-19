@@ -12,6 +12,21 @@ use crate::local_sqlite_event_database::RawEvent;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use std::time::{Duration, Instant};
+
+pub const MIN_TEXT_BATCH_DEBOUNCE: Duration = Duration::from_millis(500);
+pub const MAX_TEXT_BATCH_DEBOUNCE: Duration = Duration::from_millis(1000);
+
+#[derive(Debug, Default)]
+pub struct MetadataTextBatcher { buffered: String, last_input: Option<Instant> }
+impl MetadataTextBatcher {
+    pub fn push(&mut self, text: &str) { self.buffered.push_str(text); self.last_input = Some(Instant::now()); }
+    pub fn flush_if_due(&mut self, debounce: Duration) -> Option<String> {
+        let debounce = debounce.clamp(MIN_TEXT_BATCH_DEBOUNCE, MAX_TEXT_BATCH_DEBOUNCE);
+        if self.last_input.is_some_and(|last| last.elapsed() >= debounce) { self.last_input = None; return Some(std::mem::take(&mut self.buffered)); }
+        None
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct InputCaptureSettings {
@@ -90,5 +105,12 @@ mod tests {
         let event = normalize_keyboard_event("key_down", 65, Some("Editor".into()), None);
         assert_eq!(event.privacy_class, "input_metadata");
         assert_eq!(event.text, None);
+    }
+    #[test]
+    fn text_batcher_clamps_debounce_and_preserves_order() {
+        let mut batcher = MetadataTextBatcher::default();
+        batcher.push("a"); batcher.push("b");
+        assert!(batcher.flush_if_due(Duration::ZERO).is_none());
+        assert!(batcher.flush_if_due(MAX_TEXT_BATCH_DEBOUNCE).is_none());
     }
 }

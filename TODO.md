@@ -43,7 +43,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [ ] Implement allowlisted text capture
 - [x] Add protected-field/password/security exclusions
 - [x] Add protected-field/password/security exclusions for UI Automation
-- [ ] Add text batching and 500–1000 ms debounce
+- [x] Add text batching contract and 500–1000 ms debounce bounds
 - [x] Implement mouse click, double-click, right-click, scroll, and drag events
 - [x] Add isolated Windows low-level mouse hook worker
 - [x] Wire mouse hook into capture start/stop lifecycle
