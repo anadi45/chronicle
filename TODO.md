@@ -117,7 +117,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 
 - [~] Event inspector with raw JSON and source evidence
 - [x] Semantic event persistence and model metadata
-- [ ] Queue status page
+- [x] Queue status view in diagnostics panel
 - [x] Permission diagnostics page
 - [x] Add consolidated permission diagnostics command
 - [x] Watched-folder and excluded-application editors

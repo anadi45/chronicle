@@ -57,3 +57,4 @@ Capture and persistence must remain fast and reliable even when local AI inferen
 - Export produces local JSON data; delete-all permanently removes local raw, semantic, embedding, and queue records after confirmation.
 - Queue retries are persisted with attempt counts and retry timestamps, so transient failures do not spin continuously after restart.
 - The Diagnostics action in the desktop shell reports capture permissions, exclusions, storage counts, queue state, and provider availability.
+- Queue status is available from Diagnostics, including pending, processing, completed, failed, and cancelled task counts.
