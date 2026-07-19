@@ -93,6 +93,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [x] Add cancellation for pending queue tasks
 - [x] Add bounded queue backpressure
 - [ ] Test capture while workers are busy
+- [x] Test bounded work while processing workers are busy
 
 ## Local AI and semantic events
 

@@ -64,7 +64,7 @@ impl Database {
     }
 
     #[cfg(test)]
-    fn in_memory() -> Result<Self> {
+    pub(crate) fn in_memory() -> Result<Self> {
         Self::from_connection(Connection::open_in_memory()?)
     }
 

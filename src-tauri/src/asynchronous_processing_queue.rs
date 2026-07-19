@@ -118,6 +118,8 @@ pub fn run_processing_worker(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::local_sqlite_event_database::RawEvent;
+    use std::sync::atomic::AtomicUsize;
     #[test]
     fn retries_back_off() {
         assert_eq!(MAX_RETRY_ATTEMPTS, 3);
@@ -140,5 +142,22 @@ mod tests {
         metrics.reset();
         assert_eq!(metrics, ProcessingMetrics::default());
         assert_eq!(metrics.average_latency_ms(), None);
+    }
+
+    #[test]
+    fn busy_worker_processes_bounded_work_and_stops() {
+        struct BusyProcessor { calls: AtomicUsize }
+        impl QueueTaskProcessor for BusyProcessor {
+            fn process(&self, _task: &QueueTask) -> Result<(), String> { std::thread::sleep(Duration::from_millis(10)); self.calls.fetch_add(1, Ordering::Relaxed); Ok(()) }
+        }
+        let database = Arc::new(Mutex::new(Database::in_memory().unwrap()));
+        database.lock().unwrap().insert_event(&RawEvent { id: "busy-event".into(), timestamp_ns: 1, event_type: "test".into(), source: "test".into(), app_name: None, executable_path: None, process_id: None, window_handle: None, window_title: None, element_name: None, text: None, file_path: None, metadata_json: "{}".into(), privacy_class: "test".into(), confidence: 1.0, created_at: "2026-01-01T00:00:00Z".into() }).unwrap();
+        database.lock().unwrap().enqueue_task(&QueueTask { id: "busy-task".into(), raw_event_id: "busy-event".into(), task_type: TaskType::SemanticTextAnalysis, status: QueueStatus::Pending, attempts: 0, priority: 0 }).unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        let processor = Arc::new(BusyProcessor { calls: AtomicUsize::new(0) });
+        let worker = run_processing_worker(database.clone(), stop.clone(), processor.clone());
+        std::thread::sleep(Duration::from_millis(50)); stop.store(true, Ordering::Relaxed); worker.join().unwrap();
+        assert_eq!(processor.calls.load(Ordering::Relaxed), 1);
+        assert_eq!(database.lock().unwrap().queue_counts().unwrap().get("complete"), Some(&1));
     }
 }
