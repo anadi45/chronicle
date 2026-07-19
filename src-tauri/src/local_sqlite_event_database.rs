@@ -72,6 +72,8 @@ impl Database {
         connection.pragma_update(None, "journal_mode", "WAL")?;
         connection.pragma_update(None, "foreign_keys", "ON")?;
         connection.execute_batch(include_str!("../migrations/001_initial.sql"))?;
+        // Migrate pre-search builds away from the raw-event FTS surface.
+        connection.execute_batch("DROP TRIGGER IF EXISTS raw_events_ai; DROP TRIGGER IF EXISTS raw_events_ad; DROP TABLE IF EXISTS raw_events_fts;")?;
         // Keep existing installations compatible with the retry timestamp added after v1.
         let _ = connection.execute("ALTER TABLE processing_queue ADD COLUMN retry_at TEXT", []);
         Ok(Self { connection })
@@ -113,26 +115,18 @@ impl Database {
         self.connection.query_row("SELECT id, timestamp_ns, event_type, source, app_name, executable_path, process_id, window_handle, window_title, element_name, text, file_path, metadata_json, privacy_class, confidence, created_at FROM raw_events WHERE id = ?1", [id], map_event).optional()
     }
 
-    pub fn recent_events(&self, limit: u32, query: Option<&str>) -> Result<Vec<RawEvent>> {
-        let mut statement = if query.is_some() {
-            self.connection.prepare("SELECT r.id, r.timestamp_ns, r.event_type, r.source, r.app_name, r.executable_path, r.process_id, r.window_handle, r.window_title, r.element_name, r.text, r.file_path, r.metadata_json, r.privacy_class, r.confidence, r.created_at FROM raw_events r JOIN raw_events_fts f ON f.rowid = r.rowid WHERE raw_events_fts MATCH ?1 ORDER BY r.timestamp_ns DESC LIMIT ?2")?
-        } else {
-            self.connection.prepare("SELECT id, timestamp_ns, event_type, source, app_name, executable_path, process_id, window_handle, window_title, element_name, text, file_path, metadata_json, privacy_class, confidence, created_at FROM raw_events ORDER BY timestamp_ns DESC LIMIT ?1")?
-        };
-        let rows = if let Some(query) = query {
-            statement.query_map(params![query, limit], map_event)?
-        } else {
-            statement.query_map(params![limit], map_event)?
-        };
+    pub fn recent_events(&self, limit: u32, _query: Option<&str>) -> Result<Vec<RawEvent>> {
+        let mut statement = self.connection.prepare("SELECT id, timestamp_ns, event_type, source, app_name, executable_path, process_id, window_handle, window_title, element_name, text, file_path, metadata_json, privacy_class, confidence, created_at FROM raw_events ORDER BY timestamp_ns DESC LIMIT ?1")?;
+        let rows = statement.query_map(params![limit], map_event)?;
         rows.collect()
     }
 
     pub fn recent_semantic_events(&self, limit: u32, query: Option<&str>) -> Result<Vec<SemanticEventView>> {
-        let pattern = query.map(|value| format!("%{}%", value.replace('%', "\\%").replace('_', "\\_")));
+        let pattern = query.map(|value| value.replace('"', ""));
         let mut statement = self.connection.prepare(
             "SELECT s.id, s.raw_event_id, r.timestamp_ns, r.app_name, r.window_title, s.category, s.summary, s.confidence, s.model_name, s.created_at
-             FROM semantic_events s JOIN raw_events r ON r.id = s.raw_event_id
-             WHERE (?1 IS NULL OR s.summary LIKE ?1 ESCAPE '\\' OR s.category LIKE ?1 ESCAPE '\\')
+             FROM semantic_events s JOIN raw_events r ON r.id = s.raw_event_id LEFT JOIN semantic_events_fts ON semantic_events_fts.rowid = s.rowid
+             WHERE (?1 IS NULL OR semantic_events_fts MATCH ?1)
              ORDER BY s.created_at DESC LIMIT ?2")?;
         let rows = statement.query_map(params![pattern, limit], |row| Ok(SemanticEventView {
             id: row.get(0)?, raw_event_id: row.get(1)?, timestamp_ns: row.get(2)?,
@@ -428,7 +422,7 @@ mod tests {
     }
 
     #[test]
-    fn fts_search_finds_window_title_and_text() {
+    fn raw_event_listing_does_not_search_private_evidence() {
         let database = Database::in_memory().unwrap();
         database
             .insert_event(&event(
@@ -447,8 +441,7 @@ mod tests {
             ))
             .unwrap();
         let results = database.recent_events(10, Some("compiler")).unwrap();
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].id, "rust");
+        assert_eq!(results.len(), 2);
     }
 
     #[test]

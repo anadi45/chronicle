@@ -37,6 +37,8 @@ If the Rust build succeeds but the app exits with `0xc0000139 (STATUS_ENTRYPOINT
 
 `npm test` runs the Rust repository test suite. It currently covers schema creation, event ordering, FTS search, idempotent first-run seeding, and deletion. `npm run test:frontend` runs the TypeScript compiler in no-emit mode.
 
+Search uses the `semantic_events_fts` index across processed categories, summaries, entities, and relationships; raw evidence has no FTS index.
+
 ## Development milestones
 
 1. Raw event persistence and UI — implemented
