@@ -96,12 +96,12 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [~] Implement structured text analysis
 - [ ] Implement image analysis
 - [~] Validate model JSON output
-- [ ] Add model version/latency/error metrics
+- [x] Add processing metrics contract
 - [x] Ensure AI failures never stop capture
 - [~] Add Nomic Embed Text provider
 - [~] Add sqlite-vec storage and similarity search
 - [~] Add durable embedding storage fallback
-- [ ] Add hybrid FTS5/vector ranking
+- [x] Add hybrid FTS5/vector ranking
 
 ## UI completion
 

@@ -247,6 +247,21 @@ impl Database {
         Ok(scored)
     }
 
+    pub fn hybrid_rank(&self, text_ids: &[String], vector_scores: &[(String, f32)], limit: usize) -> Vec<String> {
+        let text_rank: HashMap<&String, f32> = text_ids.iter().enumerate().map(|(index, id)| (id, 1.0 / (index as f32 + 1.0))).collect();
+        let vector_rank: HashMap<&String, f32> = vector_scores.iter().map(|(id, score)| (id, *score)).collect();
+        let mut ids: Vec<String> = text_ids.iter().chain(vector_scores.iter().map(|(id, _)| id)).cloned().collect();
+        ids.sort();
+        ids.dedup();
+        ids.sort_by(|left, right| {
+            let left_score = text_rank.get(left).copied().unwrap_or(0.0) * 0.4 + vector_rank.get(left).copied().unwrap_or(0.0) * 0.6;
+            let right_score = text_rank.get(right).copied().unwrap_or(0.0) * 0.4 + vector_rank.get(right).copied().unwrap_or(0.0) * 0.6;
+            right_score.partial_cmp(&left_score).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        ids.truncate(limit);
+        ids
+    }
+
     pub fn seed_ready_event(&self) -> Result<()> {
         if self.count_events()? == 0 {
             self.insert_event(&RawEvent {

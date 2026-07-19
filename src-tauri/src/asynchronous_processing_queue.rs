@@ -16,6 +16,9 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 
 pub const MAX_RETRY_ATTEMPTS: u32 = 3;
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct ProcessingMetrics { pub completed: u64, pub failed: u64, pub panicked: u64 }
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskType {
@@ -116,4 +119,7 @@ mod tests {
         let result = catch_unwind(AssertUnwindSafe(|| -> Result<(), String> { panic!("model failure") }));
         assert!(result.is_err());
     }
+
+    #[test]
+    fn processing_metrics_start_empty() { assert_eq!(ProcessingMetrics::default(), ProcessingMetrics { completed: 0, failed: 0, panicked: 0 }); }
 }
