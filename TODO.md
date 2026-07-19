@@ -115,7 +115,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [x] Watched-folder and excluded-application editors
 - [x] Wire export button to browser download
 - [x] Wire delete-all button with confirmation
-- [ ] Storage usage and model status indicators
+- [x] Add storage usage command
 
 ## Hardening and release
 

@@ -72,6 +72,15 @@ impl Database {
             .query_row("SELECT COUNT(*) FROM raw_events", [], |row| row.get(0))
     }
 
+    pub fn storage_counts(&self) -> Result<HashMap<String, i64>> {
+        let mut counts = HashMap::new();
+        for (name, table) in [("raw_events", "raw_events"), ("semantic_events", "semantic_events"), ("embeddings", "semantic_event_embeddings"), ("queue_tasks", "processing_queue")] {
+            let count: i64 = self.connection.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0))?;
+            counts.insert(name.to_owned(), count);
+        }
+        Ok(counts)
+    }
+
     pub fn insert_event(&self, event: &RawEvent) -> Result<()> {
         self.connection.execute(
             "INSERT INTO raw_events (id, timestamp_ns, event_type, source, app_name, executable_path, process_id, window_handle, window_title, element_name, text, file_path, metadata_json, privacy_class, confidence, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",

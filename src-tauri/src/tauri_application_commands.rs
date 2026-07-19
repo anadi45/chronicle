@@ -381,6 +381,11 @@ pub fn processing_queue_status(
 }
 
 #[tauri::command]
+pub fn storage_usage(state: State<'_, AppState>) -> Result<std::collections::HashMap<String, i64>, String> {
+    state.database.lock().map_err(|_| "database lock poisoned".to_owned())?.storage_counts().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub fn cancel_pending_processing_tasks(state: State<'_, AppState>) -> Result<usize, String> {
     state.database.lock().map_err(|_| "database lock poisoned".to_owned())?.cancel_pending_tasks().map_err(|error| error.to_string())
 }
