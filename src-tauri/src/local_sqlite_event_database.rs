@@ -357,6 +357,11 @@ mod tests {
     fn creates_schema_and_starts_empty() {
         let database = Database::in_memory().unwrap();
         assert_eq!(database.count_events().unwrap(), 0);
+        let counts = database.storage_counts().unwrap();
+        assert_eq!(counts.get("raw_events"), Some(&0));
+        assert_eq!(counts.get("semantic_events"), Some(&0));
+        assert_eq!(counts.get("embeddings"), Some(&0));
+        assert_eq!(counts.get("queue_tasks"), Some(&0));
     }
 
     #[test]
