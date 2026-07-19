@@ -78,6 +78,16 @@ pub trait ActiveWindowScreenshotProvider: Send {
     fn capture_active_window(&self) -> Result<Vec<u8>, String>;
 }
 
+#[cfg(windows)]
+pub fn graphics_capture_item_available(window_handle: isize) -> bool {
+    use windows::Graphics::Capture::GraphicsCaptureItem;
+    use windows::UI::WindowId;
+    GraphicsCaptureItem::TryCreateFromWindowId(WindowId { Value: window_handle as u64 }).is_ok()
+}
+
+#[cfg(not(windows))]
+pub fn graphics_capture_item_available(_window_handle: isize) -> bool { false }
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -136,5 +146,10 @@ mod tests {
         dispatcher.request("event", ScreenshotTrigger::DoubleClick);
         assert_eq!(dispatcher.drain(), vec![("event".into(), ScreenshotTrigger::DoubleClick)]);
         assert!(dispatcher.drain().is_empty());
+    }
+
+    #[test]
+    fn graphics_capture_probe_is_safe_for_invalid_handle() {
+        assert!(!graphics_capture_item_available(0));
     }
 }

@@ -56,8 +56,8 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 
 ## UI Automation and filesystem
 
-- [~] Read focused UI Automation element
-- [~] Capture control type, name, value, class, framework, and bounds
+- [x] Read focused UI Automation element
+- [x] Capture control type, name, class, framework, and bounds
 - [ ] Capture selected text where available
 - [x] Bound selected text and control values before persistence
 - [x] Add graceful fallback for inaccessible/elevated applications
@@ -70,7 +70,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 
 ## Screenshots and transient assets
 
-- [~] Integrate Windows Graphics Capture
+- [~] Integrate Windows Graphics Capture capability probe; frame acquisition remains pending
 - [x] Dispatch screenshot capture after meaningful events
 - [x] Keep image bytes in memory only by default
 - [x] Associate transient assets with raw events/queue tasks
