@@ -97,6 +97,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [ ] Implement image analysis
 - [~] Validate model JSON output
 - [x] Add processing metrics contract
+- [x] Add processing metrics counters
 - [x] Ensure AI failures never stop capture
 - [~] Add Nomic Embed Text provider
 - [~] Add sqlite-vec storage and similarity search

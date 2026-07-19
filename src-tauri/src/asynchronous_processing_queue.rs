@@ -18,6 +18,11 @@ pub const MAX_RETRY_ATTEMPTS: u32 = 3;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct ProcessingMetrics { pub completed: u64, pub failed: u64, pub panicked: u64 }
+impl ProcessingMetrics {
+    pub fn record_completed(&mut self) { self.completed += 1; }
+    pub fn record_failed(&mut self) { self.failed += 1; }
+    pub fn record_panicked(&mut self) { self.panicked += 1; }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -121,5 +126,9 @@ mod tests {
     }
 
     #[test]
-    fn processing_metrics_start_empty() { assert_eq!(ProcessingMetrics::default(), ProcessingMetrics { completed: 0, failed: 0, panicked: 0 }); }
+    fn processing_metrics_start_empty() {
+        let mut metrics = ProcessingMetrics::default();
+        metrics.record_completed(); metrics.record_failed(); metrics.record_panicked();
+        assert_eq!(metrics, ProcessingMetrics { completed: 1, failed: 1, panicked: 1 });
+    }
 }
