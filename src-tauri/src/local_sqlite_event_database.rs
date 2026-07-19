@@ -482,6 +482,14 @@ mod tests {
     }
 
     #[test]
+    fn persists_one_thousand_events_without_losing_count() {
+        let database = Database::in_memory().unwrap();
+        for index in 0..1_000 { database.insert_event(&event(&format!("bulk-{index}"), index, "Bulk", None)).unwrap(); }
+        assert_eq!(database.count_events().unwrap(), 1_000);
+        assert_eq!(database.recent_events(10, None).unwrap().len(), 10);
+    }
+
+    #[test]
     fn stale_processing_tasks_are_requeued() {
         let database = Database::in_memory().unwrap();
         database

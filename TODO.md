@@ -131,8 +131,8 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 
 - [ ] Add end-to-end Windows capture tests
 - [ ] Benchmark raw persistence, screenshot capture, queue latency, and search
-- [ ] Test 1,000+ events and memory growth
-- [ ] Test forced termination and queue recovery
+- [x] Test 1,000+ events and memory growth baseline
+- [x] Test forced termination and queue recovery
 - [ ] Test elevated apps, UAC, secure desktop, protected windows, and games
 - [ ] Add Windows installer icon/resources
 - [ ] Test Windows Defender/antivirus interactions
