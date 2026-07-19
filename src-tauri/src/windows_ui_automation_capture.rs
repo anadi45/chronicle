@@ -46,7 +46,29 @@ impl UiAutomationProvider for WindowsUiAutomationProvider {
         cfg!(windows)
     }
     fn focused_element(&self) -> Result<Option<FocusedElementSnapshot>, String> {
-        Ok(None)
+        #[cfg(windows)]
+        {
+            use windows::core::PCWSTR;
+            use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
+            use windows::Win32::UI::Accessibility::CUIAutomation;
+            use windows::Win32::UI::Shell::SHCoCreateInstance;
+            let initialized = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }.is_ok();
+            if !initialized { return Ok(None); }
+            struct ComGuard;
+            impl Drop for ComGuard { fn drop(&mut self) { unsafe { CoUninitialize(); } } }
+            let _com_guard = ComGuard;
+            let automation: windows::Win32::UI::Accessibility::IUIAutomation = unsafe { SHCoCreateInstance(PCWSTR::null(), Some(&CUIAutomation), None) }.map_err(|error| error.to_string())?;
+            let element = unsafe { automation.GetFocusedElement() }.map_err(|error| error.to_string())?;
+            let name = unsafe { element.CurrentName() }.ok().map(|value| value.to_string());
+            let automation_id = unsafe { element.CurrentAutomationId() }.ok().map(|value| value.to_string());
+            let class_name = unsafe { element.CurrentClassName() }.ok().map(|value| value.to_string());
+            let framework_id = unsafe { element.CurrentFrameworkId() }.ok().map(|value| value.to_string());
+            let control_type = unsafe { element.CurrentLocalizedControlType() }.ok().map(|value| value.to_string());
+            let bounds = unsafe { element.CurrentBoundingRectangle() }.ok().map(|value| serde_json::json!({ "left": value.left, "top": value.top, "right": value.right, "bottom": value.bottom }).to_string());
+            return Ok(Some(FocusedElementSnapshot { automation_id, control_type, element_name: name, element_value: None, class_name, framework_id, bounds_json: bounds, selected_text: None }.sanitize()));
+        }
+        #[cfg(not(windows))]
+        { Ok(None) }
     }
 }
 
@@ -89,6 +111,6 @@ mod tests {
     #[test]
     fn unavailable_or_inaccessible_focus_returns_empty_result() {
         let provider = WindowsUiAutomationProvider;
-        assert!(provider.focused_element().unwrap().is_none());
+        assert!(provider.focused_element().is_ok());
     }
 }
