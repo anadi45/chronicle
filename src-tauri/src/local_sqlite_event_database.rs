@@ -259,6 +259,10 @@ impl Database {
         self.connection.query_row("SELECT id, raw_event_id, category, summary, entities_json, relationships_json, confidence, model_name, model_version, created_at FROM semantic_events WHERE raw_event_id = ?1 ORDER BY created_at DESC LIMIT 1", [raw_event_id], |row| Ok(SemanticEvent { id: row.get(0)?, raw_event_id: row.get(1)?, category: row.get(2)?, summary: row.get(3)?, entities_json: row.get(4)?, relationships_json: row.get(5)?, confidence: row.get(6)?, model_name: row.get(7)?, model_version: row.get(8)?, created_at: row.get(9)? })).optional()
     }
 
+    pub fn embedding_exists(&self, semantic_event_id: &str) -> Result<bool> {
+        self.connection.query_row("SELECT EXISTS(SELECT 1 FROM semantic_event_embeddings WHERE semantic_event_id = ?1)", [semantic_event_id], |row| row.get(0))
+    }
+
     #[allow(dead_code)]
     pub fn insert_embedding(
         &self,

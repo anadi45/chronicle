@@ -49,6 +49,9 @@ pub struct EventProcessingStatus {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct RawEventProcessingOverview { pub event: RawEvent, pub processing: Vec<EventProcessingStatus>, pub semantic_ready: bool, pub embedding_ready: bool }
+
 impl AppState {
     pub fn initialize() -> rusqlite::Result<Self> {
         let database = Database::open()?;
@@ -103,6 +106,17 @@ pub fn list_semantic_events(
 ) -> Result<Vec<SemanticEventView>, String> {
     state.database.lock().map_err(|_| "database lock poisoned".to_owned())?
         .recent_semantic_events(limit.clamp(1, 500), query.as_deref()).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn list_raw_event_processing_overview(state: State<'_, AppState>, limit: u32) -> Result<Vec<RawEventProcessingOverview>, String> {
+    let database = state.database.lock().map_err(|_| "database lock poisoned".to_owned())?;
+    database.recent_events(limit.clamp(1, 500), None).map_err(|e| e.to_string())?.into_iter().map(|event| {
+        let semantic = database.semantic_for_raw_event(&event.id).map_err(|e| e.to_string())?;
+        let embedding_ready = match &semantic { Some(value) => database.embedding_exists(&value.id).map_err(|e| e.to_string())?, None => false };
+        let processing = database.processing_status_for_raw_event(&event.id).map_err(|e| e.to_string())?.into_iter().map(|(task_type, status, attempts, error)| EventProcessingStatus { task_type, status, attempts, error }).collect();
+        Ok(RawEventProcessingOverview { event, processing, semantic_ready: semantic.is_some(), embedding_ready })
+    }).collect()
 }
 
 #[tauri::command]
