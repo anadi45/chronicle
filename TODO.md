@@ -71,7 +71,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 ## Screenshots and transient assets
 
 - [~] Integrate Windows Graphics Capture
-- [~] Trigger capture after meaningful events
+- [x] Dispatch screenshot capture after meaningful events
 - [x] Keep image bytes in memory only by default
 - [x] Associate transient assets with raw events/queue tasks
 - [x] Release assets after processing or failure

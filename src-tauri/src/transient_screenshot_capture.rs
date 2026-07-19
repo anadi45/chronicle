@@ -58,6 +58,13 @@ pub struct TransientScreenshotStore {
     assets: HashMap<String, TransientScreenshotAsset>,
 }
 
+#[derive(Debug, Default)]
+pub struct ScreenshotTriggerDispatcher { pending: Vec<(String, ScreenshotTrigger)> }
+impl ScreenshotTriggerDispatcher {
+    pub fn request(&mut self, raw_event_id: impl Into<String>, trigger: ScreenshotTrigger) { if trigger.meaningful() { self.pending.push((raw_event_id.into(), trigger)); } }
+    pub fn drain(&mut self) -> Vec<(String, ScreenshotTrigger)> { std::mem::take(&mut self.pending) }
+}
+
 impl TransientScreenshotStore {
     pub fn insert(&mut self, asset: TransientScreenshotAsset) -> bool { if !asset.is_valid() { return false; } self.assets.insert(asset.raw_event_id.clone(), asset); true }
     pub fn associate_queue_task(&mut self, raw_event_id: &str, queue_task_id: String) -> bool { if let Some(asset) = self.assets.get_mut(raw_event_id) { asset.queue_task_id = Some(queue_task_id); true } else { false } }
@@ -121,5 +128,13 @@ mod tests {
     #[test]
     fn default_retention_is_short_and_explicit() {
         assert_eq!(DEFAULT_SCREENSHOT_RETENTION, Duration::from_secs(30));
+    }
+
+    #[test]
+    fn dispatcher_queues_only_meaningful_triggers() {
+        let mut dispatcher = ScreenshotTriggerDispatcher::default();
+        dispatcher.request("event", ScreenshotTrigger::DoubleClick);
+        assert_eq!(dispatcher.drain(), vec![("event".into(), ScreenshotTrigger::DoubleClick)]);
+        assert!(dispatcher.drain().is_empty());
     }
 }
