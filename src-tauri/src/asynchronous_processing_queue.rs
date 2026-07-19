@@ -25,6 +25,7 @@ impl ProcessingMetrics {
     pub fn record_completed_with_latency(&mut self, latency: Duration) { self.record_completed(); self.total_latency_ms += latency.as_millis(); }
     pub fn record_failed(&mut self) { self.failed += 1; }
     pub fn record_panicked(&mut self) { self.panicked += 1; }
+    pub fn average_latency_ms(&self) -> Option<f64> { (self.completed > 0).then(|| self.total_latency_ms as f64 / self.completed as f64) }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -132,8 +133,10 @@ mod tests {
     fn processing_metrics_start_empty() {
         let mut metrics = ProcessingMetrics::default();
         metrics.record_completed_with_latency(Duration::from_millis(25)); metrics.record_failed(); metrics.record_panicked();
+        assert_eq!(metrics.average_latency_ms(), Some(25.0));
         assert_eq!(metrics.snapshot(), ProcessingMetrics { completed: 1, failed: 1, panicked: 1, total_latency_ms: 25 });
         metrics.reset();
         assert_eq!(metrics, ProcessingMetrics::default());
+        assert_eq!(metrics.average_latency_ms(), None);
     }
 }
