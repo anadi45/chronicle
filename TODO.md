@@ -41,6 +41,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [x] Add normalized keyboard/mouse event contracts and privacy metadata
 - [x] Persist independent keyboard/mouse permission settings
 - [x] Implement allowlisted text capture contract
+- [x] Enforce allowlist during keyboard event normalization
 - [x] Add protected-field/password/security exclusions
 - [x] Add protected-field/password/security exclusions for UI Automation
 - [x] Add text batching contract and 500–1000 ms debounce bounds

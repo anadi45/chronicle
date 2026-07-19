@@ -96,6 +96,17 @@ pub fn normalize_keyboard_event(
     }
 }
 
+pub fn normalize_allowlisted_keyboard_event(
+    settings: &InputCaptureSettings,
+    event_type: &str,
+    key_code: u32,
+    app_name: Option<String>,
+    text: Option<String>,
+) -> RawEvent {
+    let allowed_text = app_name.as_deref().filter(|name| settings.allows_keyboard_text(name)).and(text);
+    normalize_keyboard_event(event_type, key_code, app_name, allowed_text)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -125,5 +136,11 @@ mod tests {
         let settings = InputCaptureSettings { capture_keyboard_text: true, keyboard_text_allowlist: vec!["Editor".into()], ..Default::default() };
         assert!(settings.allows_keyboard_text("editor"));
         assert!(!settings.allows_keyboard_text("Browser"));
+    }
+    #[test]
+    fn normalization_drops_text_for_non_allowlisted_application() {
+        let settings = InputCaptureSettings { capture_keyboard_text: true, keyboard_text_allowlist: vec!["Editor".into()], ..Default::default() };
+        let event = normalize_allowlisted_keyboard_event(&settings, "key_down", 65, Some("Browser".into()), Some("secret".into()));
+        assert!(event.text.is_none());
     }
 }
