@@ -41,7 +41,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 - [x] Add normalized keyboard/mouse event contracts and privacy metadata
 - [x] Persist independent keyboard/mouse permission settings
 - [ ] Implement allowlisted text capture
-- [ ] Add protected-field/password/security exclusions
+- [x] Add protected-field/password/security exclusions
 - [x] Add protected-field/password/security exclusions for UI Automation
 - [ ] Add text batching and 500–1000 ms debounce
 - [x] Implement mouse click, double-click, right-click, scroll, and drag events
