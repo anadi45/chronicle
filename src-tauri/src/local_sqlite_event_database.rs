@@ -121,8 +121,9 @@ impl Database {
         for event in events {
             if self.semantic_for_raw_event(&event.id)?.is_some() { continue; }
             let task_type = if event.window_handle.is_some() { TaskType::SemanticImageAnalysis } else { TaskType::SemanticTextAnalysis };
-            let task_name = match task_type { TaskType::SemanticImageAnalysis => "SemanticImageAnalysis", _ => "SemanticTextAnalysis" };
-            let has_task: bool = self.connection.query_row("SELECT EXISTS(SELECT 1 FROM processing_queue WHERE raw_event_id = ?1 AND task_type = ?2 AND status IN ('pending','processing'))", params![event.id, task_name], |row| row.get(0))?;
+            let task_name = match task_type { TaskType::SemanticImageAnalysis => "semantic_image_analysis", _ => "semantic_text_analysis" };
+            let legacy_task_name = match task_type { TaskType::SemanticImageAnalysis => "SemanticImageAnalysis", _ => "SemanticTextAnalysis" };
+            let has_task: bool = self.connection.query_row("SELECT EXISTS(SELECT 1 FROM processing_queue WHERE raw_event_id = ?1 AND task_type IN (?2, ?3) AND status IN ('pending','processing'))", params![event.id, task_name, legacy_task_name], |row| row.get(0))?;
             if !has_task {
                 self.enqueue_task(&QueueTask { id: uuid::Uuid::new_v4().to_string(), raw_event_id: event.id, task_type, status: QueueStatus::Pending, attempts: 0, priority: 0 })?;
                 queued += 1;
