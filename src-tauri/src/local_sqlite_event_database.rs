@@ -158,7 +158,7 @@ impl Database {
 
     pub fn delete_all(&self) -> Result<()> {
         self.connection.execute_batch(
-            "DELETE FROM processing_queue; DELETE FROM semantic_events; DELETE FROM raw_events;",
+            "DELETE FROM processing_queue; DELETE FROM semantic_event_embeddings; DELETE FROM semantic_events; DELETE FROM raw_events;",
         )
     }
 
@@ -541,6 +541,25 @@ mod tests {
         database.delete_all().unwrap();
         assert_eq!(database.count_events().unwrap(), 0);
         assert!(database.recent_events(10, Some("One")).unwrap().is_empty());
+    }
+
+    #[test]
+    fn delete_all_removes_embeddings_before_parent_events() {
+        let database = Database::in_memory().unwrap();
+        database.insert_event(&event("delete-embedded", 1, "Embedded", None)).unwrap();
+        database.insert_semantic_event(&SemanticEvent {
+            id: "semantic-delete".into(), raw_event_id: "delete-embedded".into(),
+            category: "test".into(), summary: "embedded record".into(),
+            entities_json: "[]".into(), relationships_json: "[]".into(),
+            confidence: 1.0, model_name: "test".into(), model_version: "1".into(),
+            created_at: "now".into(),
+        }).unwrap();
+        database.insert_embedding("semantic-delete", "test", "1", &[1.0, 0.0]).unwrap();
+        database.delete_all().unwrap();
+        let counts = database.storage_counts().unwrap();
+        assert_eq!(counts.get("raw_events"), Some(&0));
+        assert_eq!(counts.get("semantic_events"), Some(&0));
+        assert_eq!(counts.get("embeddings"), Some(&0));
     }
 
     #[test]
