@@ -40,24 +40,24 @@ CREATE TABLE IF NOT EXISTS semantic_events (
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS semantic_events_fts USING fts5(
-    category, summary, entities, relationships,
+    category, summary, entities_json, relationships_json,
     content='semantic_events', content_rowid='rowid'
 );
 
 CREATE TRIGGER IF NOT EXISTS semantic_events_ai AFTER INSERT ON semantic_events BEGIN
-    INSERT INTO semantic_events_fts(rowid, category, summary, entities, relationships)
+    INSERT INTO semantic_events_fts(rowid, category, summary, entities_json, relationships_json)
     VALUES (new.rowid, new.category, new.summary, new.entities_json, new.relationships_json);
 END;
 
 CREATE TRIGGER IF NOT EXISTS semantic_events_ad AFTER DELETE ON semantic_events BEGIN
-    INSERT INTO semantic_events_fts(semantic_events_fts, rowid, category, summary, entities, relationships)
+    INSERT INTO semantic_events_fts(semantic_events_fts, rowid, category, summary, entities_json, relationships_json)
     VALUES ('delete', old.rowid, old.category, old.summary, old.entities_json, old.relationships_json);
 END;
 
 CREATE TRIGGER IF NOT EXISTS semantic_events_au AFTER UPDATE ON semantic_events BEGIN
-    INSERT INTO semantic_events_fts(semantic_events_fts, rowid, category, summary, entities, relationships)
+    INSERT INTO semantic_events_fts(semantic_events_fts, rowid, category, summary, entities_json, relationships_json)
     VALUES ('delete', old.rowid, old.category, old.summary, old.entities_json, old.relationships_json);
-    INSERT INTO semantic_events_fts(rowid, category, summary, entities, relationships)
+    INSERT INTO semantic_events_fts(rowid, category, summary, entities_json, relationships_json)
     VALUES (new.rowid, new.category, new.summary, new.entities_json, new.relationships_json);
 END;
 
