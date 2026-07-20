@@ -6,7 +6,11 @@ param(
 
 $ErrorActionPreference = "Stop"
 $resolvedExecutable = (Resolve-Path -LiteralPath $Executable -ErrorAction Stop).Path
-$resolvedDatabase = [System.IO.Path]::GetFullPath((Join-Path (Get-Location) $Database))
+$resolvedDatabase = if ([System.IO.Path]::IsPathRooted($Database)) {
+    [System.IO.Path]::GetFullPath($Database)
+} else {
+    [System.IO.Path]::GetFullPath((Join-Path (Get-Location) $Database))
+}
 $before = if (Test-Path -LiteralPath $resolvedDatabase) { (Get-Item $resolvedDatabase).LastWriteTimeUtc } else { [DateTime]::MinValue }
 $chronicle = Start-Process -FilePath $resolvedExecutable -WorkingDirectory (Split-Path $resolvedDatabase) -PassThru
 $foreground = Start-Process -FilePath "notepad.exe" -PassThru
@@ -23,7 +27,12 @@ connection = sqlite3.connect(db)
 row = connection.execute("SELECT COUNT(*) FROM raw_events WHERE source = 'foreground_window'").fetchone()
 print(row[0])
 '@
-    $count = ($python | python - $resolvedDatabase $before).Trim()
+    $pythonCommand = Get-Command py -ErrorAction SilentlyContinue
+    if (-not $pythonCommand) { $pythonCommand = Get-Command python -ErrorAction SilentlyContinue }
+    if (-not $pythonCommand -or $pythonCommand.Source -like "*WindowsApps*") {
+        throw "Python 3 is required for the SQLite assertion; install Python or add it to PATH."
+    }
+    $count = ($python | & $pythonCommand.Source - $resolvedDatabase $before).Trim()
     if ([int]$count -eq 0) {
         Write-Warning "No foreground events were recorded. Verify Capture is enabled in Settings and rerun."
         exit 2
