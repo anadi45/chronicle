@@ -308,6 +308,7 @@ pub fn export_data(state: State<'_, AppState>) -> Result<String, String> {
 }
 
 pub fn start_capture_state(state: &AppState) -> Result<(), String> {
+    state.database.lock().map_err(|_| "database lock poisoned".to_owned())?.enqueue_unprocessed_events(500).map_err(|error| error.to_string())?;
     let mut stop_slot = state
         .capture_stop
         .lock()

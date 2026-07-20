@@ -111,6 +111,20 @@ impl Database {
         self.enqueue_task(&QueueTask { id: uuid::Uuid::new_v4().to_string(), raw_event_id: event.id.clone(), task_type: TaskType::SemanticTextAnalysis, status: QueueStatus::Pending, attempts: 0, priority: 0 })
     }
 
+    pub fn enqueue_unprocessed_events(&self, limit: u32) -> Result<usize> {
+        let events = self.recent_events(limit, None)?;
+        let mut queued = 0;
+        for event in events {
+            if self.semantic_for_raw_event(&event.id)?.is_some() { continue; }
+            let has_task: bool = self.connection.query_row("SELECT EXISTS(SELECT 1 FROM processing_queue WHERE raw_event_id = ?1 AND task_type = 'SemanticTextAnalysis' AND status IN ('pending','processing'))", [&event.id], |row| row.get(0))?;
+            if !has_task {
+                self.enqueue_task(&QueueTask { id: uuid::Uuid::new_v4().to_string(), raw_event_id: event.id, task_type: TaskType::SemanticTextAnalysis, status: QueueStatus::Pending, attempts: 0, priority: 0 })?;
+                queued += 1;
+            }
+        }
+        Ok(queued)
+    }
+
     pub fn event_by_id(&self, id: &str) -> Result<Option<RawEvent>> {
         self.connection.query_row("SELECT id, timestamp_ns, event_type, source, app_name, executable_path, process_id, window_handle, window_title, element_name, text, file_path, metadata_json, privacy_class, confidence, created_at FROM raw_events WHERE id = ?1", [id], map_event).optional()
     }
