@@ -71,7 +71,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 
 ## Screenshots and transient assets
 
-- [~] Integrate Windows Graphics Capture capability probe; frame acquisition remains pending
+- [~] Integrate Windows Graphics Capture capability probe; CPU-backed PNG frame acquisition is complete, D3D11 frame-pool acquisition remains pending
 - [x] Dispatch screenshot capture after meaningful events
 - [x] Keep image bytes in memory only by default
 - [x] Associate transient assets with raw events/queue tasks

@@ -42,6 +42,8 @@ The Timeline includes a separate Raw Evidence page for diagnostics; raw records 
 
 Capture workers automatically restart on application launch when capture was previously enabled.
 
+Window-handle events use an in-memory Windows PNG capture fallback for Gemma vision; D3D11 frame-pool capture remains an optimization for protected or accelerated windows.
+
 ## Development milestones
 
 1. Raw event persistence and UI — implemented
