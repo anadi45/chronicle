@@ -42,7 +42,7 @@ The Timeline includes a separate Raw Evidence page for diagnostics; raw records 
 
 Capture workers automatically restart on application launch when capture was previously enabled.
 
-Window-handle events use an in-memory Windows PNG capture fallback for Gemma vision; D3D11 frame-pool capture remains an optimization for protected or accelerated windows.
+Window-handle events use Windows Graphics Capture with D3D11 texture readback for Gemma vision, with an in-memory GDI/CPU fallback for unsupported or unavailable windows.
 
 ## Development milestones
 

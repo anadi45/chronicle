@@ -90,7 +90,13 @@ impl QueueTaskProcessor for LocalModelQueueProcessor {
         match task.task_type {
             TaskType::SemanticTextAnalysis => { let output = provider.analyze_text(&context)?; persist_semantic_result(&database, task, &provider, output) }
             TaskType::EmbeddingGeneration => { let embedding = provider.embed(&context)?; let semantic_id = database.lock().map_err(|_| "database lock poisoned")?.semantic_for_raw_event(&task.raw_event_id).map_err(|e| e.to_string())?.ok_or("semantic event not found")?.id; database.lock().map_err(|_| "database lock poisoned")?.insert_embedding(&semantic_id, &provider.nomic_model, "ollama", &embedding).map_err(|e| e.to_string()) }
-            TaskType::SemanticImageAnalysis => { let window_handle = event.window_handle.ok_or("image task has no window handle")?; let image = crate::windows_active_window_screenshot::capture_window_png(window_handle as isize)?; let output = provider.analyze_image(&image)?; persist_semantic_result(&database, task, &provider, output) }
+            TaskType::SemanticImageAnalysis => {
+                let window_handle = event.window_handle.ok_or("image task has no window handle")?;
+                let image = crate::windows_graphics_capture_session::capture_one_frame_png(window_handle as isize)
+                    .or_else(|_| crate::windows_active_window_screenshot::capture_window_png(window_handle as isize))?;
+                let output = provider.analyze_image(&image)?;
+                persist_semantic_result(&database, task, &provider, output)
+            }
         }
     }
 }
