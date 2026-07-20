@@ -24,13 +24,13 @@ pub fn capture_window_png(window_handle: isize) -> Result<Vec<u8>, String> {
     let memory = unsafe { CreateCompatibleDC(Some(source)) };
     if memory.is_invalid() { unsafe { ReleaseDC(Some(hwnd), source); } return Err("CreateCompatibleDC failed".into()); }
     let bitmap = unsafe { CreateCompatibleBitmap(source, width, height) };
-    if bitmap.is_invalid() { unsafe { DeleteDC(memory); ReleaseDC(Some(hwnd), source); } return Err("CreateCompatibleBitmap failed".into()); }
+    if bitmap.is_invalid() { unsafe { let _ = DeleteDC(memory); let _ = ReleaseDC(Some(hwnd), source); } return Err("CreateCompatibleBitmap failed".into()); }
     let previous = unsafe { SelectObject(memory, bitmap.into()) };
     let copied = unsafe { BitBlt(memory, 0, 0, width, height, Some(source), 0, 0, SRCCOPY).is_ok() };
     let mut pixels = vec![0u8; width as usize * height as usize * 4];
     let mut info = BITMAPINFO { bmiHeader: BITMAPINFOHEADER { biSize: core::mem::size_of::<BITMAPINFOHEADER>() as u32, biWidth: width, biHeight: -height, biPlanes: 1, biBitCount: 32, biCompression: BI_RGB.0, ..Default::default() }, ..Default::default() };
     let read = if copied { unsafe { GetDIBits(memory, bitmap, 0, height as u32, Some(pixels.as_mut_ptr().cast()), &mut info, DIB_RGB_COLORS) } } else { 0 };
-    unsafe { SelectObject(memory, previous); DeleteObject(bitmap.into()); DeleteDC(memory); ReleaseDC(Some(hwnd), source); }
+    unsafe { SelectObject(memory, previous); let _ = DeleteObject(bitmap.into()); let _ = DeleteDC(memory); let _ = ReleaseDC(Some(hwnd), source); }
     if read == 0 { return Err("GetDIBits failed".into()); }
     for pixel in pixels.chunks_exact_mut(4) { pixel.swap(0, 2); pixel[3] = 255; }
     encode_png_rgba(width as u32, height as u32, &pixels)
