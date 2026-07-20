@@ -76,6 +76,11 @@ pub trait QueueTaskProcessor: Send + Sync {
 }
 
 pub struct LocalModelQueueProcessor { pub database: Arc<Mutex<Database>> }
+fn persist_semantic_result(database: &Arc<Mutex<Database>>, task: &QueueTask, provider: &OllamaLocalModelProvider, output: crate::local_semantic_processing::SemanticModelOutput) -> Result<(), String> {
+    if database.lock().map_err(|_| "database lock poisoned")?.semantic_for_raw_event(&task.raw_event_id).map_err(|e| e.to_string())?.is_some() { return Ok(()); }
+    database.lock().map_err(|_| "database lock poisoned")?.insert_semantic_event(&SemanticEvent { id: Uuid::new_v4().to_string(), raw_event_id: task.raw_event_id.clone(), category: output.category, summary: output.summary, entities_json: serde_json::to_string(&output.entities).unwrap_or_default(), relationships_json: serde_json::to_string(&output.relationships).unwrap_or_default(), confidence: output.confidence, model_name: provider.gemma_model.clone(), model_version: "ollama".into(), created_at: Utc::now().to_rfc3339() }).map_err(|e| e.to_string())?;
+    database.lock().map_err(|_| "database lock poisoned")?.enqueue_task(&QueueTask { id: Uuid::new_v4().to_string(), raw_event_id: task.raw_event_id.clone(), task_type: TaskType::EmbeddingGeneration, status: QueueStatus::Pending, attempts: 0, priority: -1 }).map_err(|e| e.to_string())
+}
 impl QueueTaskProcessor for LocalModelQueueProcessor {
     fn process(&self, task: &QueueTask) -> Result<(), String> {
         let provider = OllamaLocalModelProvider::default();
@@ -83,9 +88,9 @@ impl QueueTaskProcessor for LocalModelQueueProcessor {
         let event = database.lock().map_err(|_| "database lock poisoned")?.event_by_id(&task.raw_event_id).map_err(|e| e.to_string())?.ok_or("raw event not found")?;
         let context = format!("application: {:?}\nwindow: {:?}\nevent: {}\ntext: {:?}", event.app_name, event.window_title, event.event_type, event.text);
         match task.task_type {
-            TaskType::SemanticTextAnalysis => { if database.lock().map_err(|_| "database lock poisoned")?.semantic_for_raw_event(&task.raw_event_id).map_err(|e| e.to_string())?.is_some() { return Ok(()); } let output = provider.analyze_text(&context)?; let semantic_id = Uuid::new_v4().to_string(); database.lock().map_err(|_| "database lock poisoned")?.insert_semantic_event(&SemanticEvent { id: semantic_id, raw_event_id: task.raw_event_id.clone(), category: output.category, summary: output.summary, entities_json: serde_json::to_string(&output.entities).unwrap_or_default(), relationships_json: serde_json::to_string(&output.relationships).unwrap_or_default(), confidence: output.confidence, model_name: provider.gemma_model.clone(), model_version: "ollama".into(), created_at: Utc::now().to_rfc3339() }).map_err(|e| e.to_string())?; database.lock().map_err(|_| "database lock poisoned")?.enqueue_task(&QueueTask { id: Uuid::new_v4().to_string(), raw_event_id: task.raw_event_id.clone(), task_type: TaskType::EmbeddingGeneration, status: QueueStatus::Pending, attempts: 0, priority: -1 }).map_err(|e| e.to_string())?; Ok(()) }
+            TaskType::SemanticTextAnalysis => { let output = provider.analyze_text(&context)?; persist_semantic_result(&database, task, &provider, output) }
             TaskType::EmbeddingGeneration => { let embedding = provider.embed(&context)?; let semantic_id = database.lock().map_err(|_| "database lock poisoned")?.semantic_for_raw_event(&task.raw_event_id).map_err(|e| e.to_string())?.ok_or("semantic event not found")?.id; database.lock().map_err(|_| "database lock poisoned")?.insert_embedding(&semantic_id, &provider.nomic_model, "ollama", &embedding).map_err(|e| e.to_string()) }
-            TaskType::SemanticImageAnalysis => Err("image processing is not wired to a native image provider".into()),
+            TaskType::SemanticImageAnalysis => { let window_handle = event.window_handle.ok_or("image task has no window handle")?; let image = crate::windows_active_window_screenshot::capture_window_png(window_handle as isize)?; let output = provider.analyze_image(&image)?; persist_semantic_result(&database, task, &provider, output) }
         }
     }
 }
