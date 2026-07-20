@@ -76,6 +76,9 @@ impl Database {
         connection.execute_batch("DROP TRIGGER IF EXISTS raw_events_ai; DROP TRIGGER IF EXISTS raw_events_ad; DROP TABLE IF EXISTS raw_events_fts;")?;
         // Keep existing installations compatible with the retry timestamp added after v1.
         let _ = connection.execute("ALTER TABLE processing_queue ADD COLUMN retry_at TEXT", []);
+        // Binary vectors avoid JSON parsing overhead while retaining the JSON
+        // column for backwards-compatible exports and older installations.
+        let _ = connection.execute("ALTER TABLE semantic_event_embeddings ADD COLUMN embedding_blob BLOB", []);
         Ok(Self { connection })
     }
 
@@ -291,7 +294,7 @@ impl Database {
         model_version: &str,
         embedding: &[f32],
     ) -> Result<()> {
-        self.connection.execute("INSERT INTO semantic_event_embeddings (semantic_event_id, model_name, model_version, dimensions, embedding_json, created_at) VALUES (?1, ?2, ?3, ?4, ?5, datetime('now')) ON CONFLICT(semantic_event_id) DO UPDATE SET model_name=excluded.model_name, model_version=excluded.model_version, dimensions=excluded.dimensions, embedding_json=excluded.embedding_json, created_at=excluded.created_at", params![semantic_event_id, model_name, model_version, embedding.len() as i64, serde_json::to_string(embedding).unwrap_or_else(|_| "[]".into())])?;
+        self.connection.execute("INSERT INTO semantic_event_embeddings (semantic_event_id, model_name, model_version, dimensions, embedding_json, embedding_blob, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now')) ON CONFLICT(semantic_event_id) DO UPDATE SET model_name=excluded.model_name, model_version=excluded.model_version, dimensions=excluded.dimensions, embedding_json=excluded.embedding_json, embedding_blob=excluded.embedding_blob, created_at=excluded.created_at", params![semantic_event_id, model_name, model_version, embedding.len() as i64, serde_json::to_string(embedding).unwrap_or_else(|_| "[]".into()), encode_embedding(embedding)])?;
         Ok(())
     }
 
@@ -299,14 +302,14 @@ impl Database {
     pub fn search_embeddings(&self, query: &[f32], limit: usize) -> Result<Vec<(String, f32)>> {
         let mut statement = self
             .connection
-            .prepare("SELECT semantic_event_id, embedding_json FROM semantic_event_embeddings")?;
+            .prepare("SELECT semantic_event_id, embedding_json, embedding_blob FROM semantic_event_embeddings")?;
         let rows = statement.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<Vec<u8>>>(2)?))
         })?;
         let mut scored = Vec::new();
         for row in rows {
-            let (id, json) = row?;
-            let embedding: Vec<f32> = serde_json::from_str(&json).unwrap_or_default();
+            let (id, json, blob) = row?;
+            let embedding = blob.and_then(|bytes| decode_embedding(&bytes)).unwrap_or_else(|| serde_json::from_str(&json).unwrap_or_default());
             if embedding.len() == query.len() {
                 scored.push((id, cosine_similarity(query, &embedding)));
             }
@@ -388,6 +391,15 @@ fn cosine_similarity(left: &[f32], right: &[f32]) -> f32 {
     } else {
         dot / (left_norm * right_norm)
     }
+}
+
+fn encode_embedding(values: &[f32]) -> Vec<u8> {
+    values.iter().flat_map(|value| value.to_le_bytes()).collect()
+}
+
+fn decode_embedding(bytes: &[u8]) -> Option<Vec<f32>> {
+    if bytes.len() % 4 != 0 { return None; }
+    Some(bytes.chunks_exact(4).map(|chunk| f32::from_le_bytes(chunk.try_into().ok().unwrap())).collect())
 }
 
 #[cfg(test)]

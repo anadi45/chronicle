@@ -39,7 +39,7 @@ pub fn capture_window_png(window_handle: isize) -> Result<Vec<u8>, String> {
 #[cfg(not(windows))]
 pub fn capture_window_png(_window_handle: isize) -> Result<Vec<u8>, String> { Err("Windows screenshot provider is unavailable on this platform".into()) }
 
-fn encode_png_rgba(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
+pub(crate) fn encode_png_rgba(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
     if rgba.len() != width as usize * height as usize * 4 { return Err("pixel buffer dimensions do not match".into()); }
     let mut scanlines = Vec::with_capacity((rgba.len() + height as usize) + 6);
     for row in rgba.chunks_exact(width as usize * 4) { scanlines.push(0); scanlines.extend_from_slice(row); }

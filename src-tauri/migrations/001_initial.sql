@@ -91,5 +91,6 @@ CREATE TABLE IF NOT EXISTS semantic_event_embeddings (
     model_version TEXT NOT NULL,
     dimensions INTEGER NOT NULL,
     embedding_json TEXT NOT NULL,
+    embedding_blob BLOB,
     created_at TEXT NOT NULL
 );
