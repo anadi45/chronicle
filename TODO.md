@@ -135,7 +135,7 @@ Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
 
 ## Hardening and release
 
-- [ ] Add end-to-end Windows capture tests
+- [~] Add end-to-end Windows capture tests; reproducible foreground-event acceptance harness is available, restricted/elevated scenarios remain manual
 - [~] Benchmark raw persistence, screenshot capture, queue latency, and search
 - [x] Add bounded FTS search baseline at 1,000 events
 - [x] Add raw persistence and queue latency baselines
