@@ -49,8 +49,14 @@ pub fn start_keyboard_hook(
             if let Ok(key_code) = receiver.recv_timeout(Duration::from_millis(100)) {
                 let event = normalize_keyboard_event("key_down", key_code, None, None);
                 match database.lock() {
-                    Ok(database) => if let Err(error) = database.insert_event_and_enqueue(&event) { tracing::warn!(%error, event_id = %event.id, "failed to persist keyboard event"); },
-                    Err(error) => tracing::warn!(%error, "failed to lock database for keyboard event"),
+                    Ok(database) => {
+                        if let Err(error) = database.insert_event_and_enqueue(&event) {
+                            tracing::warn!(%error, event_id = %event.id, "failed to persist keyboard event");
+                        }
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, "failed to lock database for keyboard event")
+                    }
                 }
             }
         }
@@ -133,7 +139,11 @@ pub fn start_mouse_hook(
                 let event =
                     normalize_mouse_event(event_type, message.x, message.y, message.button, None);
                 match database.lock() {
-                    Ok(database) => if let Err(error) = database.insert_event_and_enqueue(&event) { tracing::warn!(%error, event_id = %event.id, "failed to persist mouse event"); },
+                    Ok(database) => {
+                        if let Err(error) = database.insert_event_and_enqueue(&event) {
+                            tracing::warn!(%error, event_id = %event.id, "failed to persist mouse event");
+                        }
+                    }
                     Err(error) => tracing::warn!(%error, "failed to lock database for mouse event"),
                 }
             }

@@ -7,15 +7,15 @@ mod embedding_provider;
 mod filesystem_activity_capture;
 #[allow(dead_code)]
 mod input_capture;
+mod local_model_provider;
 #[allow(dead_code)]
 mod local_semantic_processing;
-mod local_model_provider;
-mod windows_active_window_screenshot;
-mod windows_graphics_capture_session;
 mod local_sqlite_event_database;
 mod tauri_application_commands;
 #[allow(dead_code)]
 mod transient_screenshot_capture;
+mod windows_active_window_screenshot;
+mod windows_graphics_capture_session;
 #[allow(dead_code)]
 mod windows_ui_automation_capture;
 
@@ -34,9 +34,14 @@ pub fn run() {
         .manage(state)
         .setup(|app| {
             let state = app.state::<AppState>();
-            let capture_enabled = state.settings.lock().map(|settings| settings.enabled).unwrap_or(false);
+            let capture_enabled = state
+                .settings
+                .lock()
+                .map(|settings| settings.enabled)
+                .unwrap_or(false);
             if capture_enabled {
-                tauri_application_commands::start_capture_state(&state).map_err(|error| Box::<dyn std::error::Error>::from(error))?;
+                tauri_application_commands::start_capture_state(&state)
+                    .map_err(|error| Box::<dyn std::error::Error>::from(error))?;
             }
             Ok(())
         })

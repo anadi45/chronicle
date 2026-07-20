@@ -11,19 +11,31 @@
 use crate::local_sqlite_event_database::RawEvent;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use std::time::{Duration, Instant};
+use uuid::Uuid;
 
 pub const MIN_TEXT_BATCH_DEBOUNCE: Duration = Duration::from_millis(500);
 pub const MAX_TEXT_BATCH_DEBOUNCE: Duration = Duration::from_millis(1000);
 
 #[derive(Debug, Default)]
-pub struct MetadataTextBatcher { buffered: String, last_input: Option<Instant> }
+pub struct MetadataTextBatcher {
+    buffered: String,
+    last_input: Option<Instant>,
+}
 impl MetadataTextBatcher {
-    pub fn push(&mut self, text: &str) { self.buffered.push_str(text); self.last_input = Some(Instant::now()); }
+    pub fn push(&mut self, text: &str) {
+        self.buffered.push_str(text);
+        self.last_input = Some(Instant::now());
+    }
     pub fn flush_if_due(&mut self, debounce: Duration) -> Option<String> {
         let debounce = debounce.clamp(MIN_TEXT_BATCH_DEBOUNCE, MAX_TEXT_BATCH_DEBOUNCE);
-        if self.last_input.is_some_and(|last| last.elapsed() >= debounce) { self.last_input = None; return Some(std::mem::take(&mut self.buffered)); }
+        if self
+            .last_input
+            .is_some_and(|last| last.elapsed() >= debounce)
+        {
+            self.last_input = None;
+            return Some(std::mem::take(&mut self.buffered));
+        }
         None
     }
 }
@@ -40,7 +52,11 @@ pub struct InputCaptureSettings {
 
 impl InputCaptureSettings {
     pub fn allows_keyboard_text(&self, app_name: &str) -> bool {
-        self.capture_keyboard_text && self.keyboard_text_allowlist.iter().any(|allowed| allowed.eq_ignore_ascii_case(app_name))
+        self.capture_keyboard_text
+            && self
+                .keyboard_text_allowlist
+                .iter()
+                .any(|allowed| allowed.eq_ignore_ascii_case(app_name))
     }
 }
 
@@ -104,7 +120,10 @@ pub fn normalize_allowlisted_keyboard_event(
     app_name: Option<String>,
     text: Option<String>,
 ) -> RawEvent {
-    let allowed_text = app_name.as_deref().filter(|name| settings.allows_keyboard_text(name)).and(text);
+    let allowed_text = app_name
+        .as_deref()
+        .filter(|name| settings.allows_keyboard_text(name))
+        .and(text);
     normalize_keyboard_event(event_type, key_code, app_name, allowed_text)
 }
 
@@ -128,20 +147,35 @@ mod tests {
     #[test]
     fn text_batcher_clamps_debounce_and_preserves_order() {
         let mut batcher = MetadataTextBatcher::default();
-        batcher.push("a"); batcher.push("b");
+        batcher.push("a");
+        batcher.push("b");
         assert!(batcher.flush_if_due(Duration::ZERO).is_none());
         assert!(batcher.flush_if_due(MAX_TEXT_BATCH_DEBOUNCE).is_none());
     }
     #[test]
     fn keyboard_text_requires_explicit_allowlisted_application() {
-        let settings = InputCaptureSettings { capture_keyboard_text: true, keyboard_text_allowlist: vec!["Editor".into()], ..Default::default() };
+        let settings = InputCaptureSettings {
+            capture_keyboard_text: true,
+            keyboard_text_allowlist: vec!["Editor".into()],
+            ..Default::default()
+        };
         assert!(settings.allows_keyboard_text("editor"));
         assert!(!settings.allows_keyboard_text("Browser"));
     }
     #[test]
     fn normalization_drops_text_for_non_allowlisted_application() {
-        let settings = InputCaptureSettings { capture_keyboard_text: true, keyboard_text_allowlist: vec!["Editor".into()], ..Default::default() };
-        let event = normalize_allowlisted_keyboard_event(&settings, "key_down", 65, Some("Browser".into()), Some("secret".into()));
+        let settings = InputCaptureSettings {
+            capture_keyboard_text: true,
+            keyboard_text_allowlist: vec!["Editor".into()],
+            ..Default::default()
+        };
+        let event = normalize_allowlisted_keyboard_event(
+            &settings,
+            "key_down",
+            65,
+            Some("Browser".into()),
+            Some("secret".into()),
+        );
         assert!(event.text.is_none());
     }
     #[test]

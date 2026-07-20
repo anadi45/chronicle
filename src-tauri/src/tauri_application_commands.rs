@@ -5,9 +5,12 @@
 //! work is launched in a background thread so invoke handlers stay responsive.
 
 use crate::activity_capture::CaptureSettings;
-use crate::asynchronous_processing_queue::{MAX_PENDING_TASKS, MAX_RETRY_ATTEMPTS, LocalModelQueueProcessor, run_processing_worker};
-use serde::Serialize;
+use crate::asynchronous_processing_queue::{
+    run_processing_worker, LocalModelQueueProcessor, MAX_PENDING_TASKS, MAX_RETRY_ATTEMPTS,
+};
+use crate::local_model_provider::{LocalModelStatus, OllamaLocalModelProvider};
 use crate::local_sqlite_event_database::{Database, RawEvent, SemanticEvent, SemanticEventView};
+use serde::Serialize;
 use std::sync::Mutex;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -15,7 +18,6 @@ use std::sync::{
 };
 use std::thread::JoinHandle;
 use tauri::State;
-use crate::local_model_provider::{LocalModelStatus, OllamaLocalModelProvider};
 
 pub struct AppState {
     pub database: Arc<Mutex<Database>>,
@@ -50,7 +52,12 @@ pub struct EventProcessingStatus {
 }
 
 #[derive(Debug, Serialize)]
-pub struct RawEventProcessingOverview { pub event: RawEvent, pub processing: Vec<EventProcessingStatus>, pub semantic_ready: bool, pub embedding_ready: bool }
+pub struct RawEventProcessingOverview {
+    pub event: RawEvent,
+    pub processing: Vec<EventProcessingStatus>,
+    pub semantic_ready: bool,
+    pub embedding_ready: bool,
+}
 
 impl AppState {
     pub fn initialize() -> rusqlite::Result<Self> {
@@ -78,16 +85,23 @@ pub fn health_check() -> &'static str {
 pub fn capture_active_window_screenshot(window_handle: isize) -> Result<Vec<u8>, String> {
     #[cfg(windows)]
     {
-        use crate::transient_screenshot_capture::{ActiveWindowScreenshotProvider, WindowsActiveWindowScreenshotProvider};
+        use crate::transient_screenshot_capture::{
+            ActiveWindowScreenshotProvider, WindowsActiveWindowScreenshotProvider,
+        };
         return WindowsActiveWindowScreenshotProvider { window_handle }.capture_active_window();
     }
     #[cfg(not(windows))]
-    { crate::windows_active_window_screenshot::capture_window_png(window_handle) }
+    {
+        crate::windows_active_window_screenshot::capture_window_png(window_handle)
+    }
 }
 
 #[tauri::command]
 pub fn graphics_capture_session_available(window_handle: isize) -> Result<bool, String> {
-    crate::windows_graphics_capture_session::initialize(window_handle).map(|capture| { let _ = (&capture.frame_pool, &capture.session); true })
+    crate::windows_graphics_capture_session::initialize(window_handle).map(|capture| {
+        let _ = (&capture.frame_pool, &capture.session);
+        true
+    })
 }
 
 #[tauri::command]
@@ -120,19 +134,58 @@ pub fn list_semantic_events(
     limit: u32,
     query: Option<String>,
 ) -> Result<Vec<SemanticEventView>, String> {
-    state.database.lock().map_err(|_| "database lock poisoned".to_owned())?
-        .recent_semantic_events(limit.clamp(1, 500), query.as_deref()).map_err(|error| error.to_string())
+    state
+        .database
+        .lock()
+        .map_err(|_| "database lock poisoned".to_owned())?
+        .recent_semantic_events(limit.clamp(1, 500), query.as_deref())
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-pub fn list_raw_event_processing_overview(state: State<'_, AppState>, limit: u32) -> Result<Vec<RawEventProcessingOverview>, String> {
-    let database = state.database.lock().map_err(|_| "database lock poisoned".to_owned())?;
-    database.recent_events(limit.clamp(1, 500), None).map_err(|e| e.to_string())?.into_iter().map(|event| {
-        let semantic = database.semantic_for_raw_event(&event.id).map_err(|e| e.to_string())?;
-        let embedding_ready = match &semantic { Some(value) => database.embedding_exists(&value.id).map_err(|e| e.to_string())?, None => false };
-        let processing = database.processing_status_for_raw_event(&event.id).map_err(|e| e.to_string())?.into_iter().map(|(task_type, status, attempts, error)| EventProcessingStatus { task_type, status, attempts, error }).collect();
-        Ok(RawEventProcessingOverview { event, processing, semantic_ready: semantic.is_some(), embedding_ready })
-    }).collect()
+pub fn list_raw_event_processing_overview(
+    state: State<'_, AppState>,
+    limit: u32,
+) -> Result<Vec<RawEventProcessingOverview>, String> {
+    let database = state
+        .database
+        .lock()
+        .map_err(|_| "database lock poisoned".to_owned())?;
+    database
+        .recent_events(limit.clamp(1, 500), None)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|event| {
+            let semantic = database
+                .semantic_for_raw_event(&event.id)
+                .map_err(|e| e.to_string())?;
+            let embedding_ready = match &semantic {
+                Some(value) => database
+                    .embedding_exists(&value.id)
+                    .map_err(|e| e.to_string())?,
+                None => false,
+            };
+            let processing = database
+                .processing_status_for_raw_event(&event.id)
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .map(
+                    |(task_type, status, attempts, error)| EventProcessingStatus {
+                        task_type,
+                        status,
+                        attempts,
+                        error,
+                    },
+                )
+                .collect();
+            Ok(RawEventProcessingOverview {
+                event,
+                processing,
+                semantic_ready: semantic.is_some(),
+                embedding_ready,
+            })
+        })
+        .collect()
 }
 
 #[tauri::command]
@@ -235,21 +288,51 @@ pub fn set_input_permission(
 }
 
 #[tauri::command]
-pub fn set_screenshot_permission(state: State<'_, AppState>, enabled: bool) -> Result<CaptureSettings, String> {
-    let mut settings = state.settings.lock().map_err(|_| "settings lock poisoned".to_owned())?;
+pub fn set_screenshot_permission(
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> Result<CaptureSettings, String> {
+    let mut settings = state
+        .settings
+        .lock()
+        .map_err(|_| "settings lock poisoned".to_owned())?;
     settings.screenshots_enabled = enabled;
     let json = serde_json::to_string(&*settings).map_err(|error| error.to_string())?;
-    state.database.lock().map_err(|_| "database lock poisoned".to_owned())?.save_setting("capture", &json).map_err(|error| error.to_string())?;
+    state
+        .database
+        .lock()
+        .map_err(|_| "database lock poisoned".to_owned())?
+        .save_setting("capture", &json)
+        .map_err(|error| error.to_string())?;
     Ok(settings.clone())
 }
 
 #[tauri::command]
-pub fn set_keyboard_text_allowlist(state: State<'_, AppState>, applications: Vec<String>) -> Result<CaptureSettings, String> {
-    let mut settings = state.settings.lock().map_err(|_| "settings lock poisoned".to_owned())?;
-    settings.keyboard_text_allowlist = applications.into_iter().map(|value| value.trim().to_owned()).filter(|value| !value.is_empty()).collect();
-    settings.keyboard_mode = if settings.keyboard_text_allowlist.is_empty() { crate::activity_capture::KeyboardMode::MetadataOnly } else { crate::activity_capture::KeyboardMode::AllowlistedText };
+pub fn set_keyboard_text_allowlist(
+    state: State<'_, AppState>,
+    applications: Vec<String>,
+) -> Result<CaptureSettings, String> {
+    let mut settings = state
+        .settings
+        .lock()
+        .map_err(|_| "settings lock poisoned".to_owned())?;
+    settings.keyboard_text_allowlist = applications
+        .into_iter()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+        .collect();
+    settings.keyboard_mode = if settings.keyboard_text_allowlist.is_empty() {
+        crate::activity_capture::KeyboardMode::MetadataOnly
+    } else {
+        crate::activity_capture::KeyboardMode::AllowlistedText
+    };
     let json = serde_json::to_string(&*settings).map_err(|error| error.to_string())?;
-    state.database.lock().map_err(|_| "database lock poisoned".to_owned())?.save_setting("capture", &json).map_err(|error| error.to_string())?;
+    state
+        .database
+        .lock()
+        .map_err(|_| "database lock poisoned".to_owned())?
+        .save_setting("capture", &json)
+        .map_err(|error| error.to_string())?;
     Ok(settings.clone())
 }
 
@@ -285,10 +368,22 @@ pub fn set_excluded_paths(
     state: State<'_, AppState>,
     paths: Vec<String>,
 ) -> Result<CaptureSettings, String> {
-    let mut settings = state.settings.lock().map_err(|_| "settings lock poisoned".to_owned())?;
-    settings.excluded_paths = paths.into_iter().map(|path| path.trim().to_owned()).filter(|path| !path.is_empty()).collect();
+    let mut settings = state
+        .settings
+        .lock()
+        .map_err(|_| "settings lock poisoned".to_owned())?;
+    settings.excluded_paths = paths
+        .into_iter()
+        .map(|path| path.trim().to_owned())
+        .filter(|path| !path.is_empty())
+        .collect();
     let json = serde_json::to_string(&*settings).map_err(|error| error.to_string())?;
-    state.database.lock().map_err(|_| "database lock poisoned".to_owned())?.save_setting("capture", &json).map_err(|error| error.to_string())?;
+    state
+        .database
+        .lock()
+        .map_err(|_| "database lock poisoned".to_owned())?
+        .save_setting("capture", &json)
+        .map_err(|error| error.to_string())?;
     Ok(settings.clone())
 }
 
@@ -333,7 +428,12 @@ pub fn export_data(state: State<'_, AppState>) -> Result<String, String> {
 }
 
 pub fn start_capture_state(state: &AppState) -> Result<(), String> {
-    state.database.lock().map_err(|_| "database lock poisoned".to_owned())?.enqueue_unprocessed_events(500).map_err(|error| error.to_string())?;
+    state
+        .database
+        .lock()
+        .map_err(|_| "database lock poisoned".to_owned())?
+        .enqueue_unprocessed_events(500)
+        .map_err(|error| error.to_string())?;
     let mut stop_slot = state
         .capture_stop
         .lock()
@@ -363,7 +463,13 @@ pub fn start_capture_state(state: &AppState) -> Result<(), String> {
         .lock()
         .map_err(|_| "capture thread lock poisoned".to_owned())?;
     threads.push(thread);
-    threads.push(run_processing_worker(state.database.clone(), stop.clone(), Arc::new(LocalModelQueueProcessor { database: state.database.clone() })));
+    threads.push(run_processing_worker(
+        state.database.clone(),
+        stop.clone(),
+        Arc::new(LocalModelQueueProcessor {
+            database: state.database.clone(),
+        }),
+    ));
     threads.push(crate::filesystem_activity_capture::start_filesystem_loop(
         state.database.clone(),
         stop.clone(),
@@ -449,41 +555,107 @@ pub fn processing_queue_status(
 }
 
 #[tauri::command]
-pub fn storage_usage(state: State<'_, AppState>) -> Result<std::collections::HashMap<String, i64>, String> {
-    state.database.lock().map_err(|_| "database lock poisoned".to_owned())?.storage_counts().map_err(|error| error.to_string())
+pub fn storage_usage(
+    state: State<'_, AppState>,
+) -> Result<std::collections::HashMap<String, i64>, String> {
+    state
+        .database
+        .lock()
+        .map_err(|_| "database lock poisoned".to_owned())?
+        .storage_counts()
+        .map_err(|error| error.to_string())
 }
 
 #[derive(Debug, Serialize)]
-pub struct ModelProviderStatus { pub semantic_provider: String, pub embedding_provider: String, pub semantic_available: bool, pub embedding_available: bool, pub local_models: LocalModelStatus }
+pub struct ModelProviderStatus {
+    pub semantic_provider: String,
+    pub embedding_provider: String,
+    pub semantic_available: bool,
+    pub embedding_available: bool,
+    pub local_models: LocalModelStatus,
+}
 
 #[tauri::command]
-pub fn model_provider_status() -> ModelProviderStatus { let provider = OllamaLocalModelProvider::default(); let local_models = provider.status(); ModelProviderStatus { semantic_provider: format!("Ollama/Gemma ({})", local_models.gemma_model), embedding_provider: format!("Ollama/Nomic ({})", local_models.nomic_model), semantic_available: local_models.gemma_available, embedding_available: local_models.nomic_available, local_models } }
+pub fn model_provider_status() -> ModelProviderStatus {
+    let provider = OllamaLocalModelProvider::default();
+    let local_models = provider.status();
+    ModelProviderStatus {
+        semantic_provider: format!("Ollama/Gemma ({})", local_models.gemma_model),
+        embedding_provider: format!("Ollama/Nomic ({})", local_models.nomic_model),
+        semantic_available: local_models.gemma_available,
+        embedding_available: local_models.nomic_available,
+        local_models,
+    }
+}
 
 #[derive(Debug, Serialize)]
-pub struct ProcessingQueueLimits { pub max_retry_attempts: u32, pub max_pending_tasks: u32 }
+pub struct ProcessingQueueLimits {
+    pub max_retry_attempts: u32,
+    pub max_pending_tasks: u32,
+}
 
 #[tauri::command]
-pub fn processing_queue_limits() -> ProcessingQueueLimits { ProcessingQueueLimits { max_retry_attempts: MAX_RETRY_ATTEMPTS, max_pending_tasks: MAX_PENDING_TASKS } }
+pub fn processing_queue_limits() -> ProcessingQueueLimits {
+    ProcessingQueueLimits {
+        max_retry_attempts: MAX_RETRY_ATTEMPTS,
+        max_pending_tasks: MAX_PENDING_TASKS,
+    }
+}
 
 #[derive(Debug, Serialize)]
-pub struct CaptureDiagnostics { pub settings: CaptureSettings, pub storage: std::collections::HashMap<String, i64>, pub queue: ProcessingQueueStatus, pub providers: ModelProviderStatus }
+pub struct CaptureDiagnostics {
+    pub settings: CaptureSettings,
+    pub storage: std::collections::HashMap<String, i64>,
+    pub queue: ProcessingQueueStatus,
+    pub providers: ModelProviderStatus,
+}
 
 #[tauri::command]
 pub fn capture_diagnostics(state: State<'_, AppState>) -> Result<CaptureDiagnostics, String> {
-    let settings = state.settings.lock().map_err(|_| "settings lock poisoned".to_owned())?.clone();
-    let database = state.database.lock().map_err(|_| "database lock poisoned".to_owned())?;
+    let settings = state
+        .settings
+        .lock()
+        .map_err(|_| "settings lock poisoned".to_owned())?
+        .clone();
+    let database = state
+        .database
+        .lock()
+        .map_err(|_| "database lock poisoned".to_owned())?;
     let counts = database.queue_counts().map_err(|error| error.to_string())?;
-    Ok(CaptureDiagnostics { settings, storage: database.storage_counts().map_err(|error| error.to_string())?, queue: ProcessingQueueStatus { pending: *counts.get("pending").unwrap_or(&0), processing: *counts.get("processing").unwrap_or(&0), complete: *counts.get("complete").unwrap_or(&0), failed: *counts.get("failed").unwrap_or(&0), cancelled: *counts.get("cancelled").unwrap_or(&0) }, providers: model_provider_status() })
+    Ok(CaptureDiagnostics {
+        settings,
+        storage: database
+            .storage_counts()
+            .map_err(|error| error.to_string())?,
+        queue: ProcessingQueueStatus {
+            pending: *counts.get("pending").unwrap_or(&0),
+            processing: *counts.get("processing").unwrap_or(&0),
+            complete: *counts.get("complete").unwrap_or(&0),
+            failed: *counts.get("failed").unwrap_or(&0),
+            cancelled: *counts.get("cancelled").unwrap_or(&0),
+        },
+        providers: model_provider_status(),
+    })
 }
 
 #[tauri::command]
 pub fn cancel_pending_processing_tasks(state: State<'_, AppState>) -> Result<usize, String> {
-    state.database.lock().map_err(|_| "database lock poisoned".to_owned())?.cancel_pending_tasks().map_err(|error| error.to_string())
+    state
+        .database
+        .lock()
+        .map_err(|_| "database lock poisoned".to_owned())?
+        .cancel_pending_tasks()
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 pub fn retry_failed_processing_tasks(state: State<'_, AppState>) -> Result<usize, String> {
-    state.database.lock().map_err(|_| "database lock poisoned".to_owned())?.retry_failed_tasks().map_err(|error| error.to_string())
+    state
+        .database
+        .lock()
+        .map_err(|_| "database lock poisoned".to_owned())?
+        .retry_failed_tasks()
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]

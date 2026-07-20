@@ -47,11 +47,17 @@ impl CaptureSettings {
 
     pub fn excludes_path(&self, path: &str) -> bool {
         let candidate = path.to_ascii_lowercase();
-        self.excluded_paths.iter().any(|excluded| candidate.contains(&excluded.to_ascii_lowercase()))
+        self.excluded_paths
+            .iter()
+            .any(|excluded| candidate.contains(&excluded.to_ascii_lowercase()))
     }
 
     pub fn allows_keyboard_text(&self, app_name: &str) -> bool {
-        matches!(self.keyboard_mode, KeyboardMode::AllowlistedText) && self.keyboard_text_allowlist.iter().any(|allowed| allowed.eq_ignore_ascii_case(app_name))
+        matches!(self.keyboard_mode, KeyboardMode::AllowlistedText)
+            && self
+                .keyboard_text_allowlist
+                .iter()
+                .any(|allowed| allowed.eq_ignore_ascii_case(app_name))
     }
 }
 
@@ -165,8 +171,14 @@ pub fn start_foreground_loop(
                     event.event_type = event_type.into();
                     event.metadata_json = format!("{{\"window_handle\":{handle}}}");
                     match database.lock() {
-                        Ok(database) => if let Err(error) = database.insert_event_and_enqueue(&event) { tracing::warn!(%error, event_id = %event.id, "failed to persist foreground event"); },
-                        Err(error) => tracing::warn!(%error, "failed to lock database for foreground event"),
+                        Ok(database) => {
+                            if let Err(error) = database.insert_event_and_enqueue(&event) {
+                                tracing::warn!(%error, event_id = %event.id, "failed to persist foreground event");
+                            }
+                        }
+                        Err(error) => {
+                            tracing::warn!(%error, "failed to lock database for foreground event")
+                        }
                     }
                     previous = Some((handle, title));
                 }
@@ -267,7 +279,10 @@ mod tests {
 
     #[test]
     fn path_exclusions_match_case_insensitive_fragments() {
-        let settings = CaptureSettings { excluded_paths: vec!["secrets".into()], ..Default::default() };
+        let settings = CaptureSettings {
+            excluded_paths: vec!["secrets".into()],
+            ..Default::default()
+        };
         assert!(settings.excludes_path("C:\\Projects\\Secrets\\notes.txt"));
         assert!(!settings.excludes_path("C:\\Projects\\Public\\notes.txt"));
     }

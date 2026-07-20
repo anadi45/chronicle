@@ -5,8 +5,8 @@
 //! queue and are then dropped, including when analysis fails.
 
 use serde::{Deserialize, Serialize};
-use std::time::{Duration, Instant};
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 pub const DEFAULT_SCREENSHOT_RETENTION: Duration = Duration::from_secs(30);
 
@@ -50,7 +50,9 @@ impl TransientScreenshotAsset {
     pub fn expired(&self, retention: Duration) -> bool {
         self.captured_at.elapsed() >= retention
     }
-    pub fn is_valid(&self) -> bool { !self.bytes.is_empty() && self.mime_type.starts_with("image/") }
+    pub fn is_valid(&self) -> bool {
+        !self.bytes.is_empty() && self.mime_type.starts_with("image/")
+    }
 }
 
 #[derive(Default)]
@@ -59,19 +61,48 @@ pub struct TransientScreenshotStore {
 }
 
 #[derive(Debug, Default)]
-pub struct ScreenshotTriggerDispatcher { pending: Vec<(String, ScreenshotTrigger)> }
+pub struct ScreenshotTriggerDispatcher {
+    pending: Vec<(String, ScreenshotTrigger)>,
+}
 impl ScreenshotTriggerDispatcher {
-    pub fn request(&mut self, raw_event_id: impl Into<String>, trigger: ScreenshotTrigger) { if trigger.meaningful() { self.pending.push((raw_event_id.into(), trigger)); } }
-    pub fn drain(&mut self) -> Vec<(String, ScreenshotTrigger)> { std::mem::take(&mut self.pending) }
+    pub fn request(&mut self, raw_event_id: impl Into<String>, trigger: ScreenshotTrigger) {
+        if trigger.meaningful() {
+            self.pending.push((raw_event_id.into(), trigger));
+        }
+    }
+    pub fn drain(&mut self) -> Vec<(String, ScreenshotTrigger)> {
+        std::mem::take(&mut self.pending)
+    }
 }
 
 impl TransientScreenshotStore {
-    pub fn insert(&mut self, asset: TransientScreenshotAsset) -> bool { if !asset.is_valid() { return false; } self.assets.insert(asset.raw_event_id.clone(), asset); true }
-    pub fn associate_queue_task(&mut self, raw_event_id: &str, queue_task_id: String) -> bool { if let Some(asset) = self.assets.get_mut(raw_event_id) { asset.queue_task_id = Some(queue_task_id); true } else { false } }
-    pub fn take(&mut self, raw_event_id: &str) -> Option<TransientScreenshotAsset> { self.assets.remove(raw_event_id) }
-    pub fn purge_expired(&mut self, retention: Duration) { self.assets.retain(|_, asset| !asset.expired(retention)); }
-    pub fn purge_default_retention(&mut self) { self.purge_expired(DEFAULT_SCREENSHOT_RETENTION); }
-    pub fn len(&self) -> usize { self.assets.len() }
+    pub fn insert(&mut self, asset: TransientScreenshotAsset) -> bool {
+        if !asset.is_valid() {
+            return false;
+        }
+        self.assets.insert(asset.raw_event_id.clone(), asset);
+        true
+    }
+    pub fn associate_queue_task(&mut self, raw_event_id: &str, queue_task_id: String) -> bool {
+        if let Some(asset) = self.assets.get_mut(raw_event_id) {
+            asset.queue_task_id = Some(queue_task_id);
+            true
+        } else {
+            false
+        }
+    }
+    pub fn take(&mut self, raw_event_id: &str) -> Option<TransientScreenshotAsset> {
+        self.assets.remove(raw_event_id)
+    }
+    pub fn purge_expired(&mut self, retention: Duration) {
+        self.assets.retain(|_, asset| !asset.expired(retention));
+    }
+    pub fn purge_default_retention(&mut self) {
+        self.purge_expired(DEFAULT_SCREENSHOT_RETENTION);
+    }
+    pub fn len(&self) -> usize {
+        self.assets.len()
+    }
 }
 
 pub trait ActiveWindowScreenshotProvider: Send {
@@ -94,11 +125,16 @@ impl ActiveWindowScreenshotProvider for WindowsActiveWindowScreenshotProvider {
 pub fn graphics_capture_item_available(window_handle: isize) -> bool {
     use windows::Graphics::Capture::GraphicsCaptureItem;
     use windows::UI::WindowId;
-    GraphicsCaptureItem::TryCreateFromWindowId(WindowId { Value: window_handle as u64 }).is_ok()
+    GraphicsCaptureItem::TryCreateFromWindowId(WindowId {
+        Value: window_handle as u64,
+    })
+    .is_ok()
 }
 
 #[cfg(not(windows))]
-pub fn graphics_capture_item_available(_window_handle: isize) -> bool { false }
+pub fn graphics_capture_item_available(_window_handle: isize) -> bool {
+    false
+}
 
 #[cfg(test)]
 mod tests {
@@ -117,7 +153,11 @@ mod tests {
     #[test]
     fn store_releases_assets_after_processing() {
         let mut store = TransientScreenshotStore::default();
-        assert!(store.insert(TransientScreenshotAsset::new("event".into(), vec![1], "image/png")));
+        assert!(store.insert(TransientScreenshotAsset::new(
+            "event".into(),
+            vec![1],
+            "image/png"
+        )));
         assert_eq!(store.len(), 1);
         assert!(store.take("event").is_some());
         assert_eq!(store.len(), 0);
@@ -126,15 +166,26 @@ mod tests {
     #[test]
     fn store_associates_asset_with_queue_task() {
         let mut store = TransientScreenshotStore::default();
-        store.insert(TransientScreenshotAsset::new("event".into(), vec![1], "image/png"));
+        store.insert(TransientScreenshotAsset::new(
+            "event".into(),
+            vec![1],
+            "image/png",
+        ));
         assert!(store.associate_queue_task("event", "task".into()));
-        assert_eq!(store.take("event").unwrap().queue_task_id.as_deref(), Some("task"));
+        assert_eq!(
+            store.take("event").unwrap().queue_task_id.as_deref(),
+            Some("task")
+        );
     }
 
     #[test]
     fn store_purges_expired_assets() {
         let mut store = TransientScreenshotStore::default();
-        store.insert(TransientScreenshotAsset::new("expired".into(), vec![1], "image/png"));
+        store.insert(TransientScreenshotAsset::new(
+            "expired".into(),
+            vec![1],
+            "image/png",
+        ));
         store.purge_expired(Duration::ZERO);
         assert_eq!(store.len(), 0);
     }
@@ -142,8 +193,16 @@ mod tests {
     #[test]
     fn store_rejects_empty_and_non_image_assets() {
         let mut store = TransientScreenshotStore::default();
-        assert!(!store.insert(TransientScreenshotAsset::new("empty".into(), vec![], "image/png")));
-        assert!(!store.insert(TransientScreenshotAsset::new("text".into(), vec![1], "text/plain")));
+        assert!(!store.insert(TransientScreenshotAsset::new(
+            "empty".into(),
+            vec![],
+            "image/png"
+        )));
+        assert!(!store.insert(TransientScreenshotAsset::new(
+            "text".into(),
+            vec![1],
+            "text/plain"
+        )));
         assert_eq!(store.len(), 0);
     }
 
@@ -156,7 +215,10 @@ mod tests {
     fn dispatcher_queues_only_meaningful_triggers() {
         let mut dispatcher = ScreenshotTriggerDispatcher::default();
         dispatcher.request("event", ScreenshotTrigger::DoubleClick);
-        assert_eq!(dispatcher.drain(), vec![("event".into(), ScreenshotTrigger::DoubleClick)]);
+        assert_eq!(
+            dispatcher.drain(),
+            vec![("event".into(), ScreenshotTrigger::DoubleClick)]
+        );
         assert!(dispatcher.drain().is_empty());
     }
 

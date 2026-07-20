@@ -29,17 +29,39 @@ pub fn start_filesystem_loop(
                 .lock()
                 .map(|settings| settings.watched_folders.clone())
                 .unwrap_or_default();
-            let excluded_paths = settings.lock().map(|settings| settings.excluded_paths.clone()).unwrap_or_default();
+            let excluded_paths = settings
+                .lock()
+                .map(|settings| settings.excluded_paths.clone())
+                .unwrap_or_default();
             let current = snapshot(&folders, &excluded_paths);
-            let removed: Vec<(String, u128)> = previous.iter().filter(|(path, _)| !current.contains_key(path.as_str())).map(|(path, modified)| (path.clone(), *modified)).collect();
-            let added: Vec<(String, u128)> = current.iter().filter(|(path, _)| !previous.contains_key(path.as_str())).map(|(path, modified)| (path.clone(), *modified)).collect();
-            for ((old_path, _old_modified), (new_path, new_modified)) in removed.iter().zip(added.iter()).filter(|((_, old), (_, new))| old == new && *old > 0) {
+            let removed: Vec<(String, u128)> = previous
+                .iter()
+                .filter(|(path, _)| !current.contains_key(path.as_str()))
+                .map(|(path, modified)| (path.clone(), *modified))
+                .collect();
+            let added: Vec<(String, u128)> = current
+                .iter()
+                .filter(|(path, _)| !previous.contains_key(path.as_str()))
+                .map(|(path, modified)| (path.clone(), *modified))
+                .collect();
+            for ((old_path, _old_modified), (new_path, new_modified)) in removed
+                .iter()
+                .zip(added.iter())
+                .filter(|((_, old), (_, new))| old == new && *old > 0)
+            {
                 persist(&database, "file_renamed", new_path, *new_modified);
                 let _ = old_path;
             }
             for (path, modified) in &current {
                 let event_type = match previous.get(path.as_str()) {
-                    None if !removed.iter().zip(added.iter()).any(|((_, old_modified), (new, new_modified))| new == path && old_modified == new_modified) => Some("file_created"),
+                    None if !removed.iter().zip(added.iter()).any(
+                        |((_, old_modified), (new, new_modified))| {
+                            new == path && old_modified == new_modified
+                        },
+                    ) =>
+                    {
+                        Some("file_created")
+                    }
                     Some(old) if old != modified => Some("file_modified"),
                     _ => None,
                 };
@@ -51,7 +73,13 @@ pub fn start_filesystem_loop(
                 .keys()
                 .filter(|path| !current.contains_key(path.as_str()))
             {
-                if !removed.iter().zip(added.iter()).any(|((old, old_modified), (_new, new_modified))| old == path && old_modified == new_modified) { persist(&database, "file_deleted", path, 0); }
+                if !removed.iter().zip(added.iter()).any(
+                    |((old, old_modified), (_new, new_modified))| {
+                        old == path && old_modified == new_modified
+                    },
+                ) {
+                    persist(&database, "file_deleted", path, 0);
+                }
             }
             previous = current;
             thread::sleep(Duration::from_secs(2));
@@ -66,7 +94,13 @@ fn snapshot(folders: &[String], excluded_paths: &[String]) -> HashMap<String, u1
     result
 }
 fn collect_files(path: &Path, excluded_paths: &[String], result: &mut HashMap<String, u128>) {
-    if excluded_paths.iter().any(|excluded| path.to_string_lossy().to_ascii_lowercase().contains(&excluded.to_ascii_lowercase())) { return; }
+    if excluded_paths.iter().any(|excluded| {
+        path.to_string_lossy()
+            .to_ascii_lowercase()
+            .contains(&excluded.to_ascii_lowercase())
+    }) {
+        return;
+    }
     let Ok(entries) = fs::read_dir(path) else {
         return;
     };
@@ -105,7 +139,11 @@ fn persist(database: &Arc<Mutex<Database>>, event_type: &str, path: &str, modifi
         created_at: Utc::now().to_rfc3339(),
     };
     match database.lock() {
-        Ok(database) => if let Err(error) = database.insert_event_and_enqueue(&event) { tracing::warn!(%error, path = %path, "failed to persist filesystem event"); },
+        Ok(database) => {
+            if let Err(error) = database.insert_event_and_enqueue(&event) {
+                tracing::warn!(%error, path = %path, "failed to persist filesystem event");
+            }
+        }
         Err(error) => tracing::warn!(%error, "failed to lock database for filesystem event"),
     }
 }
@@ -123,7 +161,10 @@ mod tests {
         let file = nested.join("note.txt");
         fs::write(&file, "hello").unwrap();
 
-        let result = snapshot(&[root.to_string_lossy().into_owned(), "missing-folder".into()], &["nested/skip".into()]);
+        let result = snapshot(
+            &[root.to_string_lossy().into_owned(), "missing-folder".into()],
+            &["nested/skip".into()],
+        );
         assert!(result.contains_key(&file.to_string_lossy().to_string()));
         assert!(result.values().all(|modified| *modified > 0));
 

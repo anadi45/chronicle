@@ -4,9 +4,9 @@
 //! events first, while semantic processing may be retried or regenerated. FTS5
 //! is maintained from raw-event triggers so search remains useful without AI.
 
-use crate::asynchronous_processing_queue::{QueueStatus, QueueTask, TaskType};
-use crate::asynchronous_processing_queue::MAX_PENDING_TASKS;
 use crate::activity_capture::CaptureSettings;
+use crate::asynchronous_processing_queue::MAX_PENDING_TASKS;
+use crate::asynchronous_processing_queue::{QueueStatus, QueueTask, TaskType};
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension, Result};
 use serde::{Deserialize, Serialize};
@@ -79,7 +79,12 @@ impl Database {
         add_column_if_missing(&connection, "processing_queue", "retry_at", "TEXT")?;
         // Binary vectors avoid JSON parsing overhead while retaining the JSON
         // column for backwards-compatible exports and older installations.
-        add_column_if_missing(&connection, "semantic_event_embeddings", "embedding_blob", "BLOB")?;
+        add_column_if_missing(
+            &connection,
+            "semantic_event_embeddings",
+            "embedding_blob",
+            "BLOB",
+        )?;
         Ok(Self { connection })
     }
 
@@ -95,8 +100,17 @@ impl Database {
 
     pub fn storage_counts(&self) -> Result<HashMap<String, i64>> {
         let mut counts = HashMap::new();
-        for (name, table) in [("raw_events", "raw_events"), ("semantic_events", "semantic_events"), ("embeddings", "semantic_event_embeddings"), ("queue_tasks", "processing_queue")] {
-            let count: i64 = self.connection.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0))?;
+        for (name, table) in [
+            ("raw_events", "raw_events"),
+            ("semantic_events", "semantic_events"),
+            ("embeddings", "semantic_event_embeddings"),
+            ("queue_tasks", "processing_queue"),
+        ] {
+            let count: i64 =
+                self.connection
+                    .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                        row.get(0)
+                    })?;
             counts.insert(name.to_owned(), count);
         }
         Ok(counts)
@@ -112,19 +126,43 @@ impl Database {
 
     pub fn insert_event_and_enqueue(&self, event: &RawEvent) -> Result<()> {
         self.insert_event(event)?;
-        let task_type = if event.window_handle.is_some() && self.screenshots_enabled()? { TaskType::SemanticImageAnalysis } else { TaskType::SemanticTextAnalysis };
-        self.enqueue_task(&QueueTask { id: uuid::Uuid::new_v4().to_string(), raw_event_id: event.id.clone(), task_type, status: QueueStatus::Pending, attempts: 0, priority: 0 })
+        let task_type = if event.window_handle.is_some() && self.screenshots_enabled()? {
+            TaskType::SemanticImageAnalysis
+        } else {
+            TaskType::SemanticTextAnalysis
+        };
+        self.enqueue_task(&QueueTask {
+            id: uuid::Uuid::new_v4().to_string(),
+            raw_event_id: event.id.clone(),
+            task_type,
+            status: QueueStatus::Pending,
+            attempts: 0,
+            priority: 0,
+        })
     }
 
     pub fn enqueue_unprocessed_events(&self, limit: u32) -> Result<usize> {
         let events = self.recent_events(limit, None)?;
         let mut queued = 0;
         for event in events {
-            if self.semantic_for_raw_event(&event.id)?.is_some() { continue; }
-            let task_type = if event.window_handle.is_some() && self.screenshots_enabled()? { TaskType::SemanticImageAnalysis } else { TaskType::SemanticTextAnalysis };
+            if self.semantic_for_raw_event(&event.id)?.is_some() {
+                continue;
+            }
+            let task_type = if event.window_handle.is_some() && self.screenshots_enabled()? {
+                TaskType::SemanticImageAnalysis
+            } else {
+                TaskType::SemanticTextAnalysis
+            };
             let has_task: bool = self.connection.query_row("SELECT EXISTS(SELECT 1 FROM processing_queue WHERE raw_event_id = ?1 AND task_type IN ('semantic_text_analysis','SemanticTextAnalysis','semantic_image_analysis','SemanticImageAnalysis') AND status IN ('pending','processing'))", [&event.id], |row| row.get(0))?;
             if !has_task {
-                self.enqueue_task(&QueueTask { id: uuid::Uuid::new_v4().to_string(), raw_event_id: event.id, task_type, status: QueueStatus::Pending, attempts: 0, priority: 0 })?;
+                self.enqueue_task(&QueueTask {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    raw_event_id: event.id,
+                    task_type,
+                    status: QueueStatus::Pending,
+                    attempts: 0,
+                    priority: 0,
+                })?;
                 queued += 1;
             }
         }
@@ -141,18 +179,31 @@ impl Database {
         rows.collect()
     }
 
-    pub fn recent_semantic_events(&self, limit: u32, query: Option<&str>) -> Result<Vec<SemanticEventView>> {
+    pub fn recent_semantic_events(
+        &self,
+        limit: u32,
+        query: Option<&str>,
+    ) -> Result<Vec<SemanticEventView>> {
         let pattern = query.map(|value| value.replace('"', ""));
         let mut statement = self.connection.prepare(
             "SELECT s.id, s.raw_event_id, r.timestamp_ns, r.app_name, r.window_title, s.category, s.summary, s.confidence, s.model_name, s.created_at
              FROM semantic_events s JOIN raw_events r ON r.id = s.raw_event_id
              WHERE (?1 IS NULL OR s.rowid IN (SELECT rowid FROM semantic_events_fts WHERE semantic_events_fts MATCH ?1))
              ORDER BY s.created_at DESC LIMIT ?2")?;
-        let rows = statement.query_map(params![pattern, limit], |row| Ok(SemanticEventView {
-            id: row.get(0)?, raw_event_id: row.get(1)?, timestamp_ns: row.get(2)?,
-            app_name: row.get(3)?, window_title: row.get(4)?, category: row.get(5)?,
-            summary: row.get(6)?, confidence: row.get(7)?, model_name: row.get(8)?, created_at: row.get(9)?,
-        }))?;
+        let rows = statement.query_map(params![pattern, limit], |row| {
+            Ok(SemanticEventView {
+                id: row.get(0)?,
+                raw_event_id: row.get(1)?,
+                timestamp_ns: row.get(2)?,
+                app_name: row.get(3)?,
+                window_title: row.get(4)?,
+                category: row.get(5)?,
+                summary: row.get(6)?,
+                confidence: row.get(7)?,
+                model_name: row.get(8)?,
+                created_at: row.get(9)?,
+            })
+        })?;
         rows.collect()
     }
 
@@ -178,8 +229,12 @@ impl Database {
     }
 
     fn screenshots_enabled(&self) -> Result<bool> {
-        let Some(value) = self.load_setting("capture")? else { return Ok(false); };
-        Ok(serde_json::from_str::<CaptureSettings>(&value).map(|settings| settings.screenshots_enabled).unwrap_or(false))
+        let Some(value) = self.load_setting("capture")? else {
+            return Ok(false);
+        };
+        Ok(serde_json::from_str::<CaptureSettings>(&value)
+            .map(|settings| settings.screenshots_enabled)
+            .unwrap_or(false))
     }
 
     pub fn export_json(&self) -> Result<String> {
@@ -190,7 +245,11 @@ impl Database {
 
     #[allow(dead_code)]
     pub fn enqueue_task(&self, task: &QueueTask) -> Result<()> {
-        let pending: i64 = self.connection.query_row("SELECT COUNT(*) FROM processing_queue WHERE status = 'pending'", [], |row| row.get(0))?;
+        let pending: i64 = self.connection.query_row(
+            "SELECT COUNT(*) FROM processing_queue WHERE status = 'pending'",
+            [],
+            |row| row.get(0),
+        )?;
         if pending >= MAX_PENDING_TASKS as i64 {
             return Err(rusqlite::Error::InvalidQuery);
         }
@@ -228,7 +287,8 @@ impl Database {
     }
     pub fn fail_task(&self, task_id: &str, error: &str, retry: bool, attempt: u32) -> Result<()> {
         if retry {
-            let retry_seconds = (250u64.saturating_mul(2u64.saturating_pow(attempt.min(8))) / 1000).max(1);
+            let retry_seconds =
+                (250u64.saturating_mul(2u64.saturating_pow(attempt.min(8))) / 1000).max(1);
             self.connection.execute("UPDATE processing_queue SET status = 'pending', error = ?1, retry_at = datetime('now', '+' || ?2 || ' seconds'), completed_at = NULL WHERE id = ?3", params![error, retry_seconds.max(1), task_id])?;
         } else {
             self.connection.execute("UPDATE processing_queue SET status = 'failed', error = ?1, retry_at = NULL, completed_at = datetime('now') WHERE id = ?2", params![error, task_id])?;
@@ -289,7 +349,11 @@ impl Database {
     }
 
     pub fn embedding_exists(&self, semantic_event_id: &str) -> Result<bool> {
-        self.connection.query_row("SELECT EXISTS(SELECT 1 FROM semantic_event_embeddings WHERE semantic_event_id = ?1)", [semantic_event_id], |row| row.get(0))
+        self.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM semantic_event_embeddings WHERE semantic_event_id = ?1)",
+            [semantic_event_id],
+            |row| row.get(0),
+        )
     }
 
     #[allow(dead_code)]
@@ -310,12 +374,18 @@ impl Database {
             .connection
             .prepare("SELECT semantic_event_id, embedding_json, embedding_blob FROM semantic_event_embeddings")?;
         let rows = statement.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<Vec<u8>>>(2)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<Vec<u8>>>(2)?,
+            ))
         })?;
         let mut scored = Vec::new();
         for row in rows {
             let (id, json, blob) = row?;
-            let embedding = blob.and_then(|bytes| decode_embedding(&bytes)).unwrap_or_else(|| serde_json::from_str(&json).unwrap_or_default());
+            let embedding = blob
+                .and_then(|bytes| decode_embedding(&bytes))
+                .unwrap_or_else(|| serde_json::from_str(&json).unwrap_or_default());
             if embedding.len() == query.len() {
                 scored.push((id, cosine_similarity(query, &embedding)));
             }
@@ -326,16 +396,36 @@ impl Database {
     }
 
     #[allow(dead_code)]
-    pub fn hybrid_rank(&self, text_ids: &[String], vector_scores: &[(String, f32)], limit: usize) -> Vec<String> {
-        let text_rank: HashMap<&String, f32> = text_ids.iter().enumerate().map(|(index, id)| (id, 1.0 / (index as f32 + 1.0))).collect();
-        let vector_rank: HashMap<&String, f32> = vector_scores.iter().map(|(id, score)| (id, *score)).collect();
-        let mut ids: Vec<String> = text_ids.iter().chain(vector_scores.iter().map(|(id, _)| id)).cloned().collect();
+    pub fn hybrid_rank(
+        &self,
+        text_ids: &[String],
+        vector_scores: &[(String, f32)],
+        limit: usize,
+    ) -> Vec<String> {
+        let text_rank: HashMap<&String, f32> = text_ids
+            .iter()
+            .enumerate()
+            .map(|(index, id)| (id, 1.0 / (index as f32 + 1.0)))
+            .collect();
+        let vector_rank: HashMap<&String, f32> = vector_scores
+            .iter()
+            .map(|(id, score)| (id, *score))
+            .collect();
+        let mut ids: Vec<String> = text_ids
+            .iter()
+            .chain(vector_scores.iter().map(|(id, _)| id))
+            .cloned()
+            .collect();
         ids.sort();
         ids.dedup();
         ids.sort_by(|left, right| {
-            let left_score = text_rank.get(left).copied().unwrap_or(0.0) * 0.4 + vector_rank.get(left).copied().unwrap_or(0.0) * 0.6;
-            let right_score = text_rank.get(right).copied().unwrap_or(0.0) * 0.4 + vector_rank.get(right).copied().unwrap_or(0.0) * 0.6;
-            right_score.partial_cmp(&left_score).unwrap_or(std::cmp::Ordering::Equal)
+            let left_score = text_rank.get(left).copied().unwrap_or(0.0) * 0.4
+                + vector_rank.get(left).copied().unwrap_or(0.0) * 0.6;
+            let right_score = text_rank.get(right).copied().unwrap_or(0.0) * 0.4
+                + vector_rank.get(right).copied().unwrap_or(0.0) * 0.6;
+            right_score
+                .partial_cmp(&left_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
         ids.truncate(limit);
         ids
@@ -400,11 +490,16 @@ fn cosine_similarity(left: &[f32], right: &[f32]) -> f32 {
 }
 
 fn encode_embedding(values: &[f32]) -> Vec<u8> {
-    values.iter().flat_map(|value| value.to_le_bytes()).collect()
+    values
+        .iter()
+        .flat_map(|value| value.to_le_bytes())
+        .collect()
 }
 
 fn decode_embedding(bytes: &[u8]) -> Option<Vec<f32>> {
-    if bytes.len() % 4 != 0 { return None; }
+    if bytes.len() % 4 != 0 {
+        return None;
+    }
     let mut values = Vec::with_capacity(bytes.len() / 4);
     for chunk in bytes.chunks_exact(4) {
         values.push(f32::from_le_bytes(chunk.try_into().ok()?));
@@ -412,7 +507,12 @@ fn decode_embedding(bytes: &[u8]) -> Option<Vec<f32>> {
     Some(values)
 }
 
-fn add_column_if_missing(connection: &Connection, table: &str, column: &str, definition: &str) -> Result<()> {
+fn add_column_if_missing(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<()> {
     let statement = format!("ALTER TABLE {table} ADD COLUMN {column} {definition}");
     match connection.execute(&statement, []) {
         Ok(_) => Ok(()),
@@ -482,11 +582,16 @@ mod tests {
         let mut image_event = event("image-recovery", 1, "Image", None);
         image_event.window_handle = Some(123);
         database.insert_event(&image_event).unwrap();
-        database.enqueue_task(&QueueTask {
-            id: "image-task".into(), raw_event_id: image_event.id.clone(),
-            task_type: TaskType::SemanticImageAnalysis, status: QueueStatus::Pending,
-            attempts: 0, priority: 0,
-        }).unwrap();
+        database
+            .enqueue_task(&QueueTask {
+                id: "image-task".into(),
+                raw_event_id: image_event.id.clone(),
+                task_type: TaskType::SemanticImageAnalysis,
+                status: QueueStatus::Pending,
+                attempts: 0,
+                priority: 0,
+            })
+            .unwrap();
         assert_eq!(database.enqueue_unprocessed_events(10).unwrap(), 0);
         assert_eq!(database.queue_counts().unwrap().get("pending"), Some(&1));
     }
@@ -546,15 +651,26 @@ mod tests {
     #[test]
     fn delete_all_removes_embeddings_before_parent_events() {
         let database = Database::in_memory().unwrap();
-        database.insert_event(&event("delete-embedded", 1, "Embedded", None)).unwrap();
-        database.insert_semantic_event(&SemanticEvent {
-            id: "semantic-delete".into(), raw_event_id: "delete-embedded".into(),
-            category: "test".into(), summary: "embedded record".into(),
-            entities_json: "[]".into(), relationships_json: "[]".into(),
-            confidence: 1.0, model_name: "test".into(), model_version: "1".into(),
-            created_at: "now".into(),
-        }).unwrap();
-        database.insert_embedding("semantic-delete", "test", "1", &[1.0, 0.0]).unwrap();
+        database
+            .insert_event(&event("delete-embedded", 1, "Embedded", None))
+            .unwrap();
+        database
+            .insert_semantic_event(&SemanticEvent {
+                id: "semantic-delete".into(),
+                raw_event_id: "delete-embedded".into(),
+                category: "test".into(),
+                summary: "embedded record".into(),
+                entities_json: "[]".into(),
+                relationships_json: "[]".into(),
+                confidence: 1.0,
+                model_name: "test".into(),
+                model_version: "1".into(),
+                created_at: "now".into(),
+            })
+            .unwrap();
+        database
+            .insert_embedding("semantic-delete", "test", "1", &[1.0, 0.0])
+            .unwrap();
         database.delete_all().unwrap();
         let counts = database.storage_counts().unwrap();
         assert_eq!(counts.get("raw_events"), Some(&0));
@@ -587,11 +703,31 @@ mod tests {
     #[test]
     fn failed_retry_persists_a_future_retry_timestamp() {
         let database = Database::in_memory().unwrap();
-        database.insert_event(&event("event-retry", 1, "Retry", None)).unwrap();
-        database.enqueue_task(&QueueTask { id: "task-retry".into(), raw_event_id: "event-retry".into(), task_type: TaskType::SemanticTextAnalysis, status: QueueStatus::Pending, attempts: 0, priority: 0 }).unwrap();
+        database
+            .insert_event(&event("event-retry", 1, "Retry", None))
+            .unwrap();
+        database
+            .enqueue_task(&QueueTask {
+                id: "task-retry".into(),
+                raw_event_id: "event-retry".into(),
+                task_type: TaskType::SemanticTextAnalysis,
+                status: QueueStatus::Pending,
+                attempts: 0,
+                priority: 0,
+            })
+            .unwrap();
         database.claim_next_task().unwrap().unwrap();
-        database.fail_task("task-retry", "temporary failure", true, 3).unwrap();
-        let retry_at: Option<String> = database.connection.query_row("SELECT retry_at FROM processing_queue WHERE id = 'task-retry'", [], |row| row.get(0)).unwrap();
+        database
+            .fail_task("task-retry", "temporary failure", true, 3)
+            .unwrap();
+        let retry_at: Option<String> = database
+            .connection
+            .query_row(
+                "SELECT retry_at FROM processing_queue WHERE id = 'task-retry'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert!(retry_at.is_some());
         assert!(database.claim_next_task().unwrap().is_none());
     }
@@ -599,8 +735,19 @@ mod tests {
     #[test]
     fn cancellation_marks_only_pending_tasks() {
         let database = Database::in_memory().unwrap();
-        database.insert_event(&event("event-cancel", 1, "Cancel", None)).unwrap();
-        database.enqueue_task(&QueueTask { id: "task-cancel".into(), raw_event_id: "event-cancel".into(), task_type: TaskType::EmbeddingGeneration, status: QueueStatus::Pending, attempts: 0, priority: 0 }).unwrap();
+        database
+            .insert_event(&event("event-cancel", 1, "Cancel", None))
+            .unwrap();
+        database
+            .enqueue_task(&QueueTask {
+                id: "task-cancel".into(),
+                raw_event_id: "event-cancel".into(),
+                task_type: TaskType::EmbeddingGeneration,
+                status: QueueStatus::Pending,
+                attempts: 0,
+                priority: 0,
+            })
+            .unwrap();
         assert_eq!(database.cancel_pending_tasks().unwrap(), 1);
         assert_eq!(database.queue_counts().unwrap().get("cancelled"), Some(&1));
         assert!(database.claim_next_task().unwrap().is_none());
@@ -609,8 +756,19 @@ mod tests {
     #[test]
     fn processing_tasks_can_be_requeued_on_shutdown() {
         let database = Database::in_memory().unwrap();
-        database.insert_event(&event("event-shutdown", 1, "Shutdown", None)).unwrap();
-        database.enqueue_task(&QueueTask { id: "task-shutdown".into(), raw_event_id: "event-shutdown".into(), task_type: TaskType::EmbeddingGeneration, status: QueueStatus::Pending, attempts: 0, priority: 0 }).unwrap();
+        database
+            .insert_event(&event("event-shutdown", 1, "Shutdown", None))
+            .unwrap();
+        database
+            .enqueue_task(&QueueTask {
+                id: "task-shutdown".into(),
+                raw_event_id: "event-shutdown".into(),
+                task_type: TaskType::EmbeddingGeneration,
+                status: QueueStatus::Pending,
+                attempts: 0,
+                priority: 0,
+            })
+            .unwrap();
         database.claim_next_task().unwrap().unwrap();
         assert_eq!(database.requeue_processing_tasks().unwrap(), 1);
         assert!(database.claim_next_task().unwrap().is_some());
@@ -620,7 +778,11 @@ mod tests {
     fn persists_one_thousand_events_without_losing_count() {
         let database = Database::in_memory().unwrap();
         let started = std::time::Instant::now();
-        for index in 0..1_000 { database.insert_event(&event(&format!("bulk-{index}"), index, "Bulk", None)).unwrap(); }
+        for index in 0..1_000 {
+            database
+                .insert_event(&event(&format!("bulk-{index}"), index, "Bulk", None))
+                .unwrap();
+        }
         assert!(started.elapsed() < std::time::Duration::from_secs(2));
         assert_eq!(database.count_events().unwrap(), 1_000);
         assert_eq!(database.recent_events(10, None).unwrap().len(), 10);
@@ -629,9 +791,24 @@ mod tests {
     #[test]
     fn fts_search_has_bounded_latency_at_one_thousand_events() {
         let database = Database::in_memory().unwrap();
-        for index in 0..1_000 { database.insert_event(&event(&format!("search-{index}"), index, if index == 777 { "UniqueSearchMarker" } else { "Background" }, None)).unwrap(); }
+        for index in 0..1_000 {
+            database
+                .insert_event(&event(
+                    &format!("search-{index}"),
+                    index,
+                    if index == 777 {
+                        "UniqueSearchMarker"
+                    } else {
+                        "Background"
+                    },
+                    None,
+                ))
+                .unwrap();
+        }
         let started = std::time::Instant::now();
-        let results = database.recent_events(25, Some("UniqueSearchMarker")).unwrap();
+        let results = database
+            .recent_events(25, Some("UniqueSearchMarker"))
+            .unwrap();
         assert!(!results.is_empty());
         assert!(started.elapsed() < std::time::Duration::from_secs(2));
     }
@@ -680,18 +857,52 @@ mod tests {
     #[test]
     fn semantic_search_uses_summary_and_updates_fts_rows() {
         let database = Database::in_memory().unwrap();
-        database.insert_event(&event("event-search", 1, "Source", None)).unwrap();
-        database.insert_semantic_event(&SemanticEvent { id: "semantic-search".into(), raw_event_id: "event-search".into(), category: "coding".into(), summary: "Reviewed compiler output".into(), entities_json: "[]".into(), relationships_json: "[]".into(), confidence: 1.0, model_name: "test".into(), model_version: "1".into(), created_at: "now".into() }).unwrap();
-        assert_eq!(database.recent_semantic_events(10, Some("compiler")).unwrap().len(), 1);
+        database
+            .insert_event(&event("event-search", 1, "Source", None))
+            .unwrap();
+        database
+            .insert_semantic_event(&SemanticEvent {
+                id: "semantic-search".into(),
+                raw_event_id: "event-search".into(),
+                category: "coding".into(),
+                summary: "Reviewed compiler output".into(),
+                entities_json: "[]".into(),
+                relationships_json: "[]".into(),
+                confidence: 1.0,
+                model_name: "test".into(),
+                model_version: "1".into(),
+                created_at: "now".into(),
+            })
+            .unwrap();
+        assert_eq!(
+            database
+                .recent_semantic_events(10, Some("compiler"))
+                .unwrap()
+                .len(),
+            1
+        );
         database.connection.execute("UPDATE semantic_events SET summary = 'Reviewed design notes' WHERE id = 'semantic-search'", []).unwrap();
-        assert!(database.recent_semantic_events(10, Some("compiler")).unwrap().is_empty());
-        assert_eq!(database.recent_semantic_events(10, Some("design")).unwrap().len(), 1);
+        assert!(database
+            .recent_semantic_events(10, Some("compiler"))
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            database
+                .recent_semantic_events(10, Some("design"))
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[test]
     fn hybrid_rank_combines_text_and_vector_results() {
         let database = Database::in_memory().unwrap();
-        let ranked = database.hybrid_rank(&["text-only".into(), "shared".into()], &[("vector-only".into(), 0.9), ("shared".into(), 0.8)], 3);
+        let ranked = database.hybrid_rank(
+            &["text-only".into(), "shared".into()],
+            &[("vector-only".into(), 0.9), ("shared".into(), 0.8)],
+            3,
+        );
         assert_eq!(ranked[0], "shared");
         assert_eq!(ranked.len(), 3);
     }
