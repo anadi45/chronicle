@@ -87,7 +87,7 @@ pub fn capture_active_window_screenshot(window_handle: isize) -> Result<Vec<u8>,
 
 #[tauri::command]
 pub fn graphics_capture_session_available(window_handle: isize) -> Result<bool, String> {
-    crate::windows_graphics_capture_session::initialize(window_handle).map(|_| true)
+    crate::windows_graphics_capture_session::initialize(window_handle).map(|capture| { let _ = (&capture.frame_pool, &capture.session); true })
 }
 
 #[tauri::command]
