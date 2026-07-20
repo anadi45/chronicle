@@ -235,6 +235,15 @@ pub fn set_input_permission(
 }
 
 #[tauri::command]
+pub fn set_screenshot_permission(state: State<'_, AppState>, enabled: bool) -> Result<CaptureSettings, String> {
+    let mut settings = state.settings.lock().map_err(|_| "settings lock poisoned".to_owned())?;
+    settings.screenshots_enabled = enabled;
+    let json = serde_json::to_string(&*settings).map_err(|error| error.to_string())?;
+    state.database.lock().map_err(|_| "database lock poisoned".to_owned())?.save_setting("capture", &json).map_err(|error| error.to_string())?;
+    Ok(settings.clone())
+}
+
+#[tauri::command]
 pub fn set_keyboard_text_allowlist(state: State<'_, AppState>, applications: Vec<String>) -> Result<CaptureSettings, String> {
     let mut settings = state.settings.lock().map_err(|_| "settings lock poisoned".to_owned())?;
     settings.keyboard_text_allowlist = applications.into_iter().map(|value| value.trim().to_owned()).filter(|value| !value.is_empty()).collect();

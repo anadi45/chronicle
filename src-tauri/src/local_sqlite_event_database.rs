@@ -6,6 +6,7 @@
 
 use crate::asynchronous_processing_queue::{QueueStatus, QueueTask, TaskType};
 use crate::asynchronous_processing_queue::MAX_PENDING_TASKS;
+use crate::activity_capture::CaptureSettings;
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension, Result};
 use serde::{Deserialize, Serialize};
@@ -111,7 +112,7 @@ impl Database {
 
     pub fn insert_event_and_enqueue(&self, event: &RawEvent) -> Result<()> {
         self.insert_event(event)?;
-        let task_type = if event.window_handle.is_some() { TaskType::SemanticImageAnalysis } else { TaskType::SemanticTextAnalysis };
+        let task_type = if event.window_handle.is_some() && self.screenshots_enabled()? { TaskType::SemanticImageAnalysis } else { TaskType::SemanticTextAnalysis };
         self.enqueue_task(&QueueTask { id: uuid::Uuid::new_v4().to_string(), raw_event_id: event.id.clone(), task_type, status: QueueStatus::Pending, attempts: 0, priority: 0 })
     }
 
@@ -120,10 +121,8 @@ impl Database {
         let mut queued = 0;
         for event in events {
             if self.semantic_for_raw_event(&event.id)?.is_some() { continue; }
-            let task_type = if event.window_handle.is_some() { TaskType::SemanticImageAnalysis } else { TaskType::SemanticTextAnalysis };
-            let task_name = match task_type { TaskType::SemanticImageAnalysis => "semantic_image_analysis", _ => "semantic_text_analysis" };
-            let legacy_task_name = match task_type { TaskType::SemanticImageAnalysis => "SemanticImageAnalysis", _ => "SemanticTextAnalysis" };
-            let has_task: bool = self.connection.query_row("SELECT EXISTS(SELECT 1 FROM processing_queue WHERE raw_event_id = ?1 AND task_type IN (?2, ?3) AND status IN ('pending','processing'))", params![event.id, task_name, legacy_task_name], |row| row.get(0))?;
+            let task_type = if event.window_handle.is_some() && self.screenshots_enabled()? { TaskType::SemanticImageAnalysis } else { TaskType::SemanticTextAnalysis };
+            let has_task: bool = self.connection.query_row("SELECT EXISTS(SELECT 1 FROM processing_queue WHERE raw_event_id = ?1 AND task_type IN ('semantic_text_analysis','SemanticTextAnalysis','semantic_image_analysis','SemanticImageAnalysis') AND status IN ('pending','processing'))", [&event.id], |row| row.get(0))?;
             if !has_task {
                 self.enqueue_task(&QueueTask { id: uuid::Uuid::new_v4().to_string(), raw_event_id: event.id, task_type, status: QueueStatus::Pending, attempts: 0, priority: 0 })?;
                 queued += 1;
@@ -176,6 +175,11 @@ impl Database {
                 |row| row.get(0),
             )
             .optional()
+    }
+
+    fn screenshots_enabled(&self) -> Result<bool> {
+        let Some(value) = self.load_setting("capture")? else { return Ok(false); };
+        Ok(serde_json::from_str::<CaptureSettings>(&value).map(|settings| settings.screenshots_enabled).unwrap_or(false))
     }
 
     pub fn export_json(&self) -> Result<String> {
@@ -485,6 +489,16 @@ mod tests {
         }).unwrap();
         assert_eq!(database.enqueue_unprocessed_events(10).unwrap(), 0);
         assert_eq!(database.queue_counts().unwrap().get("pending"), Some(&1));
+    }
+
+    #[test]
+    fn window_events_use_text_processing_when_screenshots_are_disabled() {
+        let database = Database::in_memory().unwrap();
+        let mut window_event = event("screen-off", 1, "Window", None);
+        window_event.window_handle = Some(123);
+        database.insert_event_and_enqueue(&window_event).unwrap();
+        let task = database.claim_next_task().unwrap().unwrap();
+        assert_eq!(task.task_type, TaskType::SemanticTextAnalysis);
     }
 
     #[test]
