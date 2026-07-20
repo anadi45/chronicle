@@ -56,3 +56,4 @@ fn adler32(bytes: &[u8]) -> u32 { let (mut a, mut b) = (1u32, 0u32); for byte in
 fn crc32(bytes: &[u8]) -> u32 { let mut crc = 0xffff_ffffu32; for byte in bytes { crc ^= *byte as u32; for _ in 0..8 { crc = if crc & 1 != 0 { (crc >> 1) ^ 0xedb8_8320 } else { crc >> 1 }; } } !crc }
 
 #[cfg(test)] mod tests { use super::*; #[test] fn png_encoder_emits_valid_signature() { let png = encode_png_rgba(1, 1, &[255, 0, 0, 255]).unwrap(); assert_eq!(&png[..8], &[137,80,78,71,13,10,26,10]); assert!(png.windows(4).any(|chunk| chunk == b"IHDR")); } }
+#[cfg(all(test, windows))] #[test] fn invalid_window_handle_is_reported_without_panicking() { assert!(capture_window_png(0).is_err()); }
