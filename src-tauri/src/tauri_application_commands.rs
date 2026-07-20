@@ -86,6 +86,11 @@ pub fn capture_active_window_screenshot(window_handle: isize) -> Result<Vec<u8>,
 }
 
 #[tauri::command]
+pub fn graphics_capture_session_available(window_handle: isize) -> Result<bool, String> {
+    crate::windows_graphics_capture_session::initialize(window_handle).map(|_| true)
+}
+
+#[tauri::command]
 pub fn recent_event_count(state: State<'_, AppState>) -> Result<i64, String> {
     state
         .database

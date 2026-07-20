@@ -11,6 +11,7 @@ mod input_capture;
 mod local_semantic_processing;
 mod local_model_provider;
 mod windows_active_window_screenshot;
+mod windows_graphics_capture_session;
 mod local_sqlite_event_database;
 mod tauri_application_commands;
 #[allow(dead_code)]
@@ -42,6 +43,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             tauri_application_commands::health_check,
             tauri_application_commands::capture_active_window_screenshot,
+            tauri_application_commands::graphics_capture_session_available,
             tauri_application_commands::recent_event_count,
             tauri_application_commands::list_events,
             tauri_application_commands::list_semantic_events,
