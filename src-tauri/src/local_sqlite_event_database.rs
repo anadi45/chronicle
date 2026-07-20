@@ -74,11 +74,11 @@ impl Database {
         connection.execute_batch(include_str!("../migrations/001_initial.sql"))?;
         // Migrate pre-search builds away from the raw-event FTS surface.
         connection.execute_batch("DROP TRIGGER IF EXISTS raw_events_ai; DROP TRIGGER IF EXISTS raw_events_ad; DROP TABLE IF EXISTS raw_events_fts;")?;
-        // Keep existing installations compatible with the retry timestamp added after v1.
-        let _ = connection.execute("ALTER TABLE processing_queue ADD COLUMN retry_at TEXT", []);
+        // Keep existing installations compatible with columns added after v1.
+        add_column_if_missing(&connection, "processing_queue", "retry_at", "TEXT")?;
         // Binary vectors avoid JSON parsing overhead while retaining the JSON
         // column for backwards-compatible exports and older installations.
-        let _ = connection.execute("ALTER TABLE semantic_event_embeddings ADD COLUMN embedding_blob BLOB", []);
+        add_column_if_missing(&connection, "semantic_event_embeddings", "embedding_blob", "BLOB")?;
         Ok(Self { connection })
     }
 
@@ -401,7 +401,20 @@ fn encode_embedding(values: &[f32]) -> Vec<u8> {
 
 fn decode_embedding(bytes: &[u8]) -> Option<Vec<f32>> {
     if bytes.len() % 4 != 0 { return None; }
-    Some(bytes.chunks_exact(4).map(|chunk| f32::from_le_bytes(chunk.try_into().ok().unwrap())).collect())
+    let mut values = Vec::with_capacity(bytes.len() / 4);
+    for chunk in bytes.chunks_exact(4) {
+        values.push(f32::from_le_bytes(chunk.try_into().ok()?));
+    }
+    Some(values)
+}
+
+fn add_column_if_missing(connection: &Connection, table: &str, column: &str, definition: &str) -> Result<()> {
+    let statement = format!("ALTER TABLE {table} ADD COLUMN {column} {definition}");
+    match connection.execute(&statement, []) {
+        Ok(_) => Ok(()),
+        Err(error) if error.to_string().contains("duplicate column name") => Ok(()),
+        Err(error) => Err(error),
+    }
 }
 
 #[cfg(test)]
