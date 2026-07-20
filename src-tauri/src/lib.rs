@@ -30,6 +30,14 @@ pub fn run() {
     let state = AppState::initialize().expect("database initialization failed");
     tauri::Builder::default()
         .manage(state)
+        .setup(|app| {
+            let state = app.state::<AppState>();
+            let capture_enabled = state.settings.lock().map(|settings| settings.enabled).unwrap_or(false);
+            if capture_enabled {
+                tauri_application_commands::start_capture_state(&state).map_err(|error| Box::<dyn std::error::Error>::from(error))?;
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             tauri_application_commands::health_check,
             tauri_application_commands::recent_event_count,

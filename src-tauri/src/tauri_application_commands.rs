@@ -307,8 +307,7 @@ pub fn export_data(state: State<'_, AppState>) -> Result<String, String> {
         .map_err(|error| error.to_string())
 }
 
-#[tauri::command]
-pub fn start_capture(state: State<'_, AppState>) -> Result<(), String> {
+pub fn start_capture_state(state: &AppState) -> Result<(), String> {
     let mut stop_slot = state
         .capture_stop
         .lock()
@@ -371,6 +370,11 @@ pub fn start_capture(state: State<'_, AppState>) -> Result<(), String> {
         .save_setting("capture", &settings_json)
         .map_err(|error| error.to_string())?;
     Ok(())
+}
+
+#[tauri::command]
+pub fn start_capture(state: State<'_, AppState>) -> Result<(), String> {
+    start_capture_state(&state)
 }
 
 #[tauri::command]

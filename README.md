@@ -40,6 +40,8 @@ If the Rust build succeeds but the app exits with `0xc0000139 (STATUS_ENTRYPOINT
 Search uses the `semantic_events_fts` index across processed categories, summaries, entities, and relationships; raw evidence has no FTS index.
 The Timeline includes a separate Raw Evidence page for diagnostics; raw records are never mixed into processed insight search results.
 
+Capture workers automatically restart on application launch when capture was previously enabled.
+
 ## Development milestones
 
 1. Raw event persistence and UI — implemented
