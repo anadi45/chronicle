@@ -164,8 +164,9 @@ pub fn start_foreground_loop(
                     event.window_handle = Some(handle as u64);
                     event.event_type = event_type.into();
                     event.metadata_json = format!("{{\"window_handle\":{handle}}}");
-                    if let Ok(database) = database.lock() {
-                        let _ = database.insert_event_and_enqueue(&event);
+                    match database.lock() {
+                        Ok(database) => if let Err(error) = database.insert_event_and_enqueue(&event) { tracing::warn!(%error, event_id = %event.id, "failed to persist foreground event"); },
+                        Err(error) => tracing::warn!(%error, "failed to lock database for foreground event"),
                     }
                     previous = Some((handle, title));
                 }

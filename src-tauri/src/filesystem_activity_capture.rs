@@ -104,8 +104,9 @@ fn persist(database: &Arc<Mutex<Database>>, event_type: &str, path: &str, modifi
         confidence: 1.0,
         created_at: Utc::now().to_rfc3339(),
     };
-    if let Ok(database) = database.lock() {
-        let _ = database.insert_event_and_enqueue(&event);
+    match database.lock() {
+        Ok(database) => if let Err(error) = database.insert_event_and_enqueue(&event) { tracing::warn!(%error, path = %path, "failed to persist filesystem event"); },
+        Err(error) => tracing::warn!(%error, "failed to lock database for filesystem event"),
     }
 }
 
