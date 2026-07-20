@@ -61,11 +61,12 @@ Run `powershell -ExecutionPolicy Bypass -File scripts/release-smoke.ps1` on Wind
 
 ## Privacy invariant
 
-Capture and persistence must remain fast and reliable even when local AI inference is slow or unavailable. Keyboard capture will be opt-in and privacy exclusions will be implemented before enabling global hooks.
+Capture and persistence remain fast and reliable even when local AI inference is slow or unavailable. Keyboard and screen capture are opt-in, and privacy exclusions are applied before events are persisted.
 
 ## Current privacy controls
 
 - Foreground, mouse, and keyboard metadata capture are independently opt-in.
+- Screen capture is independently opt-in and disabled by default; window events use text processing while it is off.
 - Keyboard capture stores metadata only; text capture is not enabled.
 - Applications and filesystem paths can be excluded before capture events are persisted.
 - Watched-folder capture is limited to explicitly selected folders and records file metadata, not file contents.
@@ -73,5 +74,5 @@ Capture and persistence must remain fast and reliable even when local AI inferen
 - Queue retries are persisted with attempt counts and retry timestamps, so transient failures do not spin continuously after restart.
 - The Diagnostics action in the desktop shell reports capture permissions, exclusions, storage counts, queue state, and provider availability.
 - Queue status is available from Diagnostics, including pending, processing, completed, failed, and cancelled task counts.
-- Screenshot requests are restricted to explicit meaningful event triggers and remain memory-only until a native provider supplies image bytes.
+- Screenshot requests are restricted to explicit meaningful event triggers and remain memory-only through native D3D11/GDI processing.
 - Semantic model JSON is size-bounded and schema-validated before persistence; the event inspector exposes raw JSON and source evidence without replacing raw records.
