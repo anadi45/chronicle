@@ -139,8 +139,8 @@ impl Database {
         let pattern = query.map(|value| value.replace('"', ""));
         let mut statement = self.connection.prepare(
             "SELECT s.id, s.raw_event_id, r.timestamp_ns, r.app_name, r.window_title, s.category, s.summary, s.confidence, s.model_name, s.created_at
-             FROM semantic_events s JOIN raw_events r ON r.id = s.raw_event_id LEFT JOIN semantic_events_fts ON semantic_events_fts.rowid = s.rowid
-             WHERE (?1 IS NULL OR semantic_events_fts MATCH ?1)
+             FROM semantic_events s JOIN raw_events r ON r.id = s.raw_event_id
+             WHERE (?1 IS NULL OR s.rowid IN (SELECT rowid FROM semantic_events_fts WHERE semantic_events_fts MATCH ?1))
              ORDER BY s.created_at DESC LIMIT ?2")?;
         let rows = statement.query_map(params![pattern, limit], |row| Ok(SemanticEventView {
             id: row.get(0)?, raw_event_id: row.get(1)?, timestamp_ns: row.get(2)?,
