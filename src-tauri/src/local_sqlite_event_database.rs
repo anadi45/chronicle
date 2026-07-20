@@ -120,9 +120,10 @@ impl Database {
         let mut queued = 0;
         for event in events {
             if self.semantic_for_raw_event(&event.id)?.is_some() { continue; }
-            let has_task: bool = self.connection.query_row("SELECT EXISTS(SELECT 1 FROM processing_queue WHERE raw_event_id = ?1 AND task_type = 'SemanticTextAnalysis' AND status IN ('pending','processing'))", [&event.id], |row| row.get(0))?;
+            let task_type = if event.window_handle.is_some() { TaskType::SemanticImageAnalysis } else { TaskType::SemanticTextAnalysis };
+            let task_name = match task_type { TaskType::SemanticImageAnalysis => "SemanticImageAnalysis", _ => "SemanticTextAnalysis" };
+            let has_task: bool = self.connection.query_row("SELECT EXISTS(SELECT 1 FROM processing_queue WHERE raw_event_id = ?1 AND task_type = ?2 AND status IN ('pending','processing'))", params![event.id, task_name], |row| row.get(0))?;
             if !has_task {
-                let task_type = if event.window_handle.is_some() { TaskType::SemanticImageAnalysis } else { TaskType::SemanticTextAnalysis };
                 self.enqueue_task(&QueueTask { id: uuid::Uuid::new_v4().to_string(), raw_event_id: event.id, task_type, status: QueueStatus::Pending, attempts: 0, priority: 0 })?;
                 queued += 1;
             }
@@ -455,6 +456,21 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["new", "old"]
         );
+    }
+
+    #[test]
+    fn recovery_does_not_duplicate_pending_image_tasks() {
+        let database = Database::in_memory().unwrap();
+        let mut image_event = event("image-recovery", 1, "Image", None);
+        image_event.window_handle = Some(123);
+        database.insert_event(&image_event).unwrap();
+        database.enqueue_task(&QueueTask {
+            id: "image-task".into(), raw_event_id: image_event.id.clone(),
+            task_type: TaskType::SemanticImageAnalysis, status: QueueStatus::Pending,
+            attempts: 0, priority: 0,
+        }).unwrap();
+        assert_eq!(database.enqueue_unprocessed_events(10).unwrap(), 0);
+        assert_eq!(database.queue_counts().unwrap().get("pending"), Some(&1));
     }
 
     #[test]
