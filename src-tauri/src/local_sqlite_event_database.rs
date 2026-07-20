@@ -601,6 +601,17 @@ mod tests {
     }
 
     #[test]
+    fn semantic_search_uses_summary_and_updates_fts_rows() {
+        let database = Database::in_memory().unwrap();
+        database.insert_event(&event("event-search", 1, "Source", None)).unwrap();
+        database.insert_semantic_event(&SemanticEvent { id: "semantic-search".into(), raw_event_id: "event-search".into(), category: "coding".into(), summary: "Reviewed compiler output".into(), entities_json: "[]".into(), relationships_json: "[]".into(), confidence: 1.0, model_name: "test".into(), model_version: "1".into(), created_at: "now".into() }).unwrap();
+        assert_eq!(database.recent_semantic_events(10, Some("compiler")).unwrap().len(), 1);
+        database.connection.execute("UPDATE semantic_events SET summary = 'Reviewed design notes' WHERE id = 'semantic-search'", []).unwrap();
+        assert!(database.recent_semantic_events(10, Some("compiler")).unwrap().is_empty());
+        assert_eq!(database.recent_semantic_events(10, Some("design")).unwrap().len(), 1);
+    }
+
+    #[test]
     fn hybrid_rank_combines_text_and_vector_results() {
         let database = Database::in_memory().unwrap();
         let ranked = database.hybrid_rank(&["text-only".into(), "shared".into()], &[("vector-only".into(), 0.9), ("shared".into(), 0.8)], 3);

@@ -54,6 +54,13 @@ CREATE TRIGGER IF NOT EXISTS semantic_events_ad AFTER DELETE ON semantic_events 
     VALUES ('delete', old.rowid, old.category, old.summary, old.entities_json, old.relationships_json);
 END;
 
+CREATE TRIGGER IF NOT EXISTS semantic_events_au AFTER UPDATE ON semantic_events BEGIN
+    INSERT INTO semantic_events_fts(semantic_events_fts, rowid, category, summary, entities, relationships)
+    VALUES ('delete', old.rowid, old.category, old.summary, old.entities_json, old.relationships_json);
+    INSERT INTO semantic_events_fts(rowid, category, summary, entities, relationships)
+    VALUES (new.rowid, new.category, new.summary, new.entities_json, new.relationships_json);
+END;
+
 CREATE TABLE IF NOT EXISTS processing_queue (
     id TEXT PRIMARY KEY,
     raw_event_id TEXT NOT NULL REFERENCES raw_events(id),
