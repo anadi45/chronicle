@@ -65,6 +65,7 @@ pub fn run() {
             tauri_application_commands::processing_queue_limits,
             tauri_application_commands::capture_diagnostics,
             tauri_application_commands::cancel_pending_processing_tasks,
+            tauri_application_commands::retry_failed_processing_tasks,
             tauri_application_commands::processing_status_for_event
         ])
         .on_window_event(|window, event| {

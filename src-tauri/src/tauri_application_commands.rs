@@ -457,6 +457,11 @@ pub fn cancel_pending_processing_tasks(state: State<'_, AppState>) -> Result<usi
 }
 
 #[tauri::command]
+pub fn retry_failed_processing_tasks(state: State<'_, AppState>) -> Result<usize, String> {
+    state.database.lock().map_err(|_| "database lock poisoned".to_owned())?.retry_failed_tasks().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub fn processing_status_for_event(
     state: State<'_, AppState>,
     raw_event_id: String,

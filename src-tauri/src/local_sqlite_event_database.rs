@@ -244,6 +244,10 @@ impl Database {
         Ok(self.connection.execute("UPDATE processing_queue SET status = 'cancelled', completed_at = datetime('now') WHERE status = 'pending'", [])?)
     }
 
+    pub fn retry_failed_tasks(&self) -> Result<usize> {
+        Ok(self.connection.execute("UPDATE processing_queue SET status = 'pending', retry_at = NULL, completed_at = NULL, error = NULL WHERE status = 'failed'", [])?)
+    }
+
     pub fn requeue_processing_tasks(&self) -> Result<usize> {
         Ok(self.connection.execute("UPDATE processing_queue SET status = 'pending', started_at = NULL WHERE status = 'processing'", [])?)
     }
