@@ -11,7 +11,7 @@ $resolvedDatabase = if ([System.IO.Path]::IsPathRooted($Database)) {
 } else {
     [System.IO.Path]::GetFullPath((Join-Path (Get-Location) $Database))
 }
-$before = if (Test-Path -LiteralPath $resolvedDatabase) { (Get-Item $resolvedDatabase).LastWriteTimeUtc } else { [DateTime]::MinValue }
+$startedAt = (Get-Date).ToUniversalTime().ToString("o")
 $chronicle = Start-Process -FilePath $resolvedExecutable -WorkingDirectory (Split-Path $resolvedDatabase) -PassThru
 $foreground = Start-Process -FilePath "notepad.exe" -PassThru
 try {
@@ -22,9 +22,9 @@ try {
 
     $python = @'
 import sqlite3, sys
-db, before = sys.argv[1], sys.argv[2]
+db, started_at = sys.argv[1], sys.argv[2]
 connection = sqlite3.connect(db)
-row = connection.execute("SELECT COUNT(*) FROM raw_events WHERE source = 'foreground_window'").fetchone()
+row = connection.execute("SELECT COUNT(*) FROM raw_events WHERE source = 'foreground_window' AND created_at >= ?", (started_at,)).fetchone()
 print(row[0])
 '@
     $pythonCommand = Get-Command py -ErrorAction SilentlyContinue
