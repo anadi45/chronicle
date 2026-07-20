@@ -21,6 +21,17 @@ The concrete Windows hooks, Processing Queue workers, screenshots, local model r
 Local model discovery uses the Ollama-compatible API at `http://127.0.0.1:11434` by default. Set `CHRONICLE_OLLAMA_ENDPOINT`, `CHRONICLE_GEMMA_MODEL`, and `CHRONICLE_NOMIC_MODEL` to configure local models.
 Captured events enqueue local Gemma analysis followed by Nomic embedding generation. If Ollama or either model is unavailable, queue retries are used and capture continues.
 
+## Local model setup
+
+Install Ollama, start its local service, and pull the models used by Chronicle:
+
+```powershell
+ollama pull gemma3:4b
+ollama pull nomic-embed-text
+```
+
+Chronicle uses Ollama's local `/api/generate` endpoint for Gemma and `/api/embed` for Nomic. The Diagnostics panel shows the configured model names and whether each provider is reachable. `CHRONICLE_OLLAMA_ENDPOINT`, `CHRONICLE_GEMMA_MODEL`, and `CHRONICLE_NOMIC_MODEL` can override the defaults.
+
 ## Development
 
 ```powershell
