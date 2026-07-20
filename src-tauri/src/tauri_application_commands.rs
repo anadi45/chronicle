@@ -75,6 +75,17 @@ pub fn health_check() -> &'static str {
 }
 
 #[tauri::command]
+pub fn capture_active_window_screenshot(window_handle: isize) -> Result<Vec<u8>, String> {
+    #[cfg(windows)]
+    {
+        use crate::transient_screenshot_capture::{ActiveWindowScreenshotProvider, WindowsActiveWindowScreenshotProvider};
+        return WindowsActiveWindowScreenshotProvider { window_handle }.capture_active_window();
+    }
+    #[cfg(not(windows))]
+    { crate::windows_active_window_screenshot::capture_window_png(window_handle) }
+}
+
+#[tauri::command]
 pub fn recent_event_count(state: State<'_, AppState>) -> Result<i64, String> {
     state
         .database

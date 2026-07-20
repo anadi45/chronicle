@@ -79,6 +79,18 @@ pub trait ActiveWindowScreenshotProvider: Send {
 }
 
 #[cfg(windows)]
+pub struct WindowsActiveWindowScreenshotProvider {
+    pub window_handle: isize,
+}
+
+#[cfg(windows)]
+impl ActiveWindowScreenshotProvider for WindowsActiveWindowScreenshotProvider {
+    fn capture_active_window(&self) -> Result<Vec<u8>, String> {
+        crate::windows_active_window_screenshot::capture_window_png(self.window_handle)
+    }
+}
+
+#[cfg(windows)]
 pub fn graphics_capture_item_available(window_handle: isize) -> bool {
     use windows::Graphics::Capture::GraphicsCaptureItem;
     use windows::UI::WindowId;
