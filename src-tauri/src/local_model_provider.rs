@@ -6,6 +6,7 @@ use crate::local_semantic_processing::{
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
+use std::process::{Child, Command};
 use std::time::Duration;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,6 +53,29 @@ impl Default for OllamaLocalModelProvider {
     }
 }
 impl OllamaLocalModelProvider {
+    /// Start Ollama when its configured local endpoint is not already listening.
+    /// The returned child is owned by application state so Chronicle can stop
+    /// only the process it started during shutdown.
+    pub fn start_server_if_needed(&self) -> Result<Option<Child>, String> {
+        let host = self
+            .endpoint
+            .strip_prefix("http://")
+            .ok_or("only local HTTP model endpoints are supported")?;
+        let address = host
+            .to_socket_addrs()
+            .map_err(|error| format!("invalid Ollama endpoint: {error}"))?
+            .next()
+            .ok_or("Ollama endpoint unavailable")?;
+        if TcpStream::connect_timeout(&address, Duration::from_millis(250)).is_ok() {
+            return Ok(None);
+        }
+        Command::new("ollama")
+            .arg("serve")
+            .spawn()
+            .map(Some)
+            .map_err(|error| format!("unable to start Ollama: {error}"))
+    }
+
     pub fn status(&self) -> LocalModelStatus {
         let names = self.tags().unwrap_or_default();
         LocalModelStatus {

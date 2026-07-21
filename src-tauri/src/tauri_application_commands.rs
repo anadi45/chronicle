@@ -11,6 +11,7 @@ use crate::asynchronous_processing_queue::{
 use crate::local_model_provider::{LocalModelStatus, OllamaLocalModelProvider};
 use crate::local_sqlite_event_database::{Database, RawEvent, SemanticEvent, SemanticEventView};
 use serde::Serialize;
+use std::process::Child;
 use std::sync::Mutex;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -24,6 +25,7 @@ pub struct AppState {
     pub settings: Arc<Mutex<CaptureSettings>>,
     pub capture_stop: Mutex<Option<Arc<AtomicBool>>>,
     pub capture_threads: Mutex<Vec<JoinHandle<()>>>,
+    pub ollama_process: Mutex<Option<Child>>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -67,11 +69,19 @@ impl AppState {
             .load_setting("capture")?
             .and_then(|json| serde_json::from_str(&json).ok())
             .unwrap_or_default();
+        let ollama_process = match OllamaLocalModelProvider::default().start_server_if_needed() {
+            Ok(process) => process,
+            Err(error) => {
+                tracing::warn!(%error, "Ollama was not started; local AI will retry through the queue");
+                None
+            }
+        };
         Ok(Self {
             database: Arc::new(Mutex::new(database)),
             settings: Arc::new(Mutex::new(settings)),
             capture_stop: Mutex::new(None),
             capture_threads: Mutex::new(Vec::new()),
+            ollama_process: Mutex::new(ollama_process),
         })
     }
 }
@@ -691,6 +701,15 @@ pub fn stop_capture_state(state: &AppState) {
     if let Ok(mut thread_slot) = state.capture_threads.lock() {
         for thread in thread_slot.drain(..) {
             let _ = thread.join();
+        }
+    }
+}
+
+pub fn shutdown_ollama(state: &AppState) {
+    if let Ok(mut ollama_slot) = state.ollama_process.lock() {
+        if let Some(mut process) = ollama_slot.take() {
+            let _ = process.kill();
+            let _ = process.wait();
         }
     }
 }

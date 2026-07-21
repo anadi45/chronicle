@@ -23,14 +23,14 @@ Captured events enqueue local Gemma analysis followed by Nomic embedding generat
 
 ## Local model setup
 
-Install Ollama, start its local service, and pull the models used by Chronicle:
+Install Ollama and pull the models used by Chronicle:
 
 ```powershell
 ollama pull gemma3:4b
 ollama pull nomic-embed-text
 ```
 
-Chronicle uses Ollama's local `/api/generate` endpoint for Gemma and `/api/embed` for Nomic. The Diagnostics panel shows the configured model names and whether each provider is reachable. `CHRONICLE_OLLAMA_ENDPOINT`, `CHRONICLE_GEMMA_MODEL`, and `CHRONICLE_NOMIC_MODEL` can override the defaults.
+When Chronicle starts, it reuses an Ollama server already listening on the configured endpoint or launches `ollama serve` when the endpoint is unavailable. Chronicle stops only the Ollama process it started when the application closes. Chronicle uses Ollama's local `/api/generate` endpoint for Gemma and `/api/embed` for Nomic. The Diagnostics panel shows the configured model names and whether each provider is reachable. `CHRONICLE_OLLAMA_ENDPOINT`, `CHRONICLE_GEMMA_MODEL`, and `CHRONICLE_NOMIC_MODEL` can override the defaults.
 
 ## Development
 

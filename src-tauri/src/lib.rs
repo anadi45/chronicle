@@ -82,6 +82,7 @@ pub fn run() {
             if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
                 let state = window.app_handle().state::<AppState>();
                 tauri_application_commands::stop_capture_state(&state);
+                tauri_application_commands::shutdown_ollama(&state);
             }
         })
         .run(tauri::generate_context!())
