@@ -281,6 +281,46 @@ impl Database {
         }))
     }
 
+    /// Claims at most `limit` pending tasks of one type in priority order.
+    /// Keeping a batch homogeneous lets providers use one model request while
+    /// preserving independent queue rows and retry state.
+    pub fn claim_next_tasks(&self, task_type: &TaskType, limit: usize) -> Result<Vec<QueueTask>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let task_name = serde_json::to_string(task_type)
+            .unwrap_or_default()
+            .trim_matches('"')
+            .to_string();
+        let transaction = self.connection.unchecked_transaction()?;
+        let mut statement = transaction.prepare("SELECT id, raw_event_id, attempts, priority FROM processing_queue WHERE status = 'pending' AND task_type = ?1 AND (retry_at IS NULL OR retry_at <= datetime('now')) ORDER BY priority DESC, created_at ASC LIMIT ?2")?;
+        let rows = statement.query_map(params![task_name, limit as i64], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, u32>(2)?,
+                row.get::<_, i32>(3)?,
+            ))
+        })?;
+        let candidates: Vec<_> = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        drop(statement);
+        for (id, _, _, _) in &candidates {
+            transaction.execute("UPDATE processing_queue SET status = 'processing', started_at = datetime('now'), attempts = attempts + 1 WHERE id = ?1", [id])?;
+        }
+        transaction.commit()?;
+        Ok(candidates
+            .into_iter()
+            .map(|(id, raw_event_id, attempts, priority)| QueueTask {
+                id,
+                raw_event_id,
+                task_type: task_type.clone(),
+                status: QueueStatus::Processing,
+                attempts: attempts + 1,
+                priority,
+            })
+            .collect())
+    }
+
     pub fn finish_task(&self, task_id: &str) -> Result<()> {
         self.connection.execute("UPDATE processing_queue SET status = 'complete', completed_at = datetime('now') WHERE id = ?1", [task_id])?;
         Ok(())

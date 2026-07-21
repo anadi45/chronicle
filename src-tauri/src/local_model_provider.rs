@@ -37,6 +37,19 @@ struct Generate {
     response: String,
 }
 #[derive(Debug, Deserialize)]
+struct BatchSemanticResponse {
+    results: Vec<BatchSemanticItem>,
+}
+#[derive(Debug, Deserialize)]
+struct BatchSemanticItem {
+    index: usize,
+    category: String,
+    summary: String,
+    entities: Vec<String>,
+    relationships: Vec<String>,
+    confidence: f32,
+}
+#[derive(Debug, Deserialize)]
 struct Embed {
     embeddings: Vec<Vec<f32>>,
 }
@@ -100,11 +113,65 @@ impl OllamaLocalModelProvider {
         let output = self.request::<Generate>("POST", "/api/generate", &body.to_string())?;
         parse_and_validate_model_json(&output.response)
     }
+    /// Analyze several contexts in one Gemma request. The indexed response
+    /// prevents an item from being silently assigned to the wrong event.
+    pub fn analyze_text_batch(
+        &self,
+        inputs: &[String],
+    ) -> Result<Vec<SemanticModelOutput>, String> {
+        if inputs.is_empty() {
+            return Ok(Vec::new());
+        }
+        let numbered = inputs
+            .iter()
+            .enumerate()
+            .map(|(index, input)| format!("ITEM {index}:\n{input}"))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let prompt = format!("Return JSON only as {{\"results\":[{{\"index\":0,\"category\":\"...\",\"summary\":\"...\",\"entities\":[],\"relationships\":[],\"confidence\":0.0}}]}}. Include exactly one result for every item, preserving its index.\n{numbered}");
+        let body = serde_json::json!({"model": self.gemma_model, "prompt": prompt, "stream": false, "format": "json"});
+        let output = self.request::<Generate>("POST", "/api/generate", &body.to_string())?;
+        let response: BatchSemanticResponse = serde_json::from_str(&output.response)
+            .map_err(|e| format!("invalid batch semantic JSON: {e}"))?;
+        if response.results.len() != inputs.len() {
+            return Err("batch semantic response count mismatch".into());
+        }
+        let mut ordered = vec![None; inputs.len()];
+        for item in response.results {
+            if item.index >= inputs.len() || ordered[item.index].is_some() {
+                return Err("batch semantic response index mismatch".into());
+            }
+            ordered[item.index] = Some(SemanticModelOutput {
+                category: item.category,
+                summary: item.summary,
+                entities: item.entities,
+                relationships: item.relationships,
+                confidence: item.confidence,
+            });
+        }
+        ordered
+            .into_iter()
+            .map(|item| item.ok_or_else(|| "batch semantic response missing item".into()))
+            .collect()
+    }
     pub fn analyze_image(&self, bytes: &[u8]) -> Result<SemanticModelOutput, String> {
         validate_image_input(bytes)?;
         let body = serde_json::json!({"model": self.gemma_model, "prompt": "Return JSON only with category, summary, entities, relationships, confidence (0..1). Interpret this screenshot.", "images": [base64_encode(bytes)], "stream": false, "format": "json"});
         let output = self.request::<Generate>("POST", "/api/generate", &body.to_string())?;
         parse_and_validate_model_json(&output.response)
+    }
+    pub fn embed_batch(&self, inputs: &[String]) -> Result<Vec<Vec<f32>>, String> {
+        if inputs.is_empty() {
+            return Ok(Vec::new());
+        }
+        let body = serde_json::json!({"model": self.nomic_model, "input": inputs});
+        let embeddings = self
+            .request::<Embed>("POST", "/api/embed", &body.to_string())?
+            .embeddings;
+        if embeddings.len() != inputs.len() {
+            return Err("Nomic returned an incomplete embedding batch".into());
+        }
+        Ok(embeddings)
     }
     fn request<T: for<'a> Deserialize<'a>>(
         &self,
@@ -155,9 +222,7 @@ impl TextEmbedder for OllamaLocalModelProvider {
         768
     }
     fn embed(&self, input: &str) -> Result<Vec<f32>, String> {
-        let body = serde_json::json!({"model": self.nomic_model, "input": input});
-        self.request::<Embed>("POST", "/api/embed", &body.to_string())?
-            .embeddings
+        self.embed_batch(&[input.to_string()])?
             .into_iter()
             .next()
             .ok_or("Nomic returned no embedding".into())

@@ -20,6 +20,7 @@ The concrete Windows hooks, Processing Queue workers, screenshots, local model r
 
 Local model discovery uses the Ollama-compatible API at `http://127.0.0.1:11434` by default. Set `CHRONICLE_OLLAMA_ENDPOINT`, `CHRONICLE_GEMMA_MODEL`, and `CHRONICLE_NOMIC_MODEL` to configure local models.
 Captured events enqueue local Gemma analysis followed by Nomic embedding generation. If Ollama or either model is unavailable, queue retries are used and capture continues.
+AI work is performed in bounded homogeneous batches of up to eight queue items. Gemma responses are index-checked, Nomic uses its multi-input embedding endpoint, and any unsupported or malformed batch falls back to individual requests without losing per-event retry/status tracking. Screenshot analysis remains single-image and memory-bounded.
 
 ## Local model setup
 

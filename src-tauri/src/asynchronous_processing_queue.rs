@@ -21,6 +21,8 @@ use uuid::Uuid;
 
 pub const MAX_RETRY_ATTEMPTS: u32 = 3;
 pub const MAX_PENDING_TASKS: u32 = 10_000;
+/// Keeps model memory and UI latency bounded while still amortizing HTTP/model overhead.
+pub const MAX_MODEL_BATCH_SIZE: usize = 8;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ProcessingMetrics {
@@ -98,6 +100,12 @@ pub fn retry_delay(attempt: u32) -> Duration {
 
 pub trait QueueTaskProcessor: Send + Sync {
     fn process(&self, task: &QueueTask) -> Result<(), String>;
+    fn process_batch(&self, tasks: &[QueueTask]) -> Result<(), String> {
+        for task in tasks {
+            self.process(task)?;
+        }
+        Ok(())
+    }
 }
 
 pub struct LocalModelQueueProcessor {
@@ -198,6 +206,72 @@ impl QueueTaskProcessor for LocalModelQueueProcessor {
             }
         }
     }
+
+    fn process_batch(&self, tasks: &[QueueTask]) -> Result<(), String> {
+        if tasks.len() <= 1
+            || tasks
+                .iter()
+                .any(|task| task.task_type == TaskType::SemanticImageAnalysis)
+        {
+            return self.process(tasks.first().ok_or("empty processing batch")?);
+        }
+        let provider = OllamaLocalModelProvider::default();
+        let database = self.database.clone();
+        let contexts = tasks
+            .iter()
+            .map(|task| {
+                database
+                    .lock()
+                    .map_err(|_| "database lock poisoned".to_string())?
+                    .event_by_id(&task.raw_event_id)
+                    .map_err(|e| e.to_string())?
+                    .ok_or_else(|| "raw event not found".to_string())
+                    .map(|event| {
+                        format!(
+                            "application: {:?}\nwindow: {:?}\nevent: {}\ntext: {:?}",
+                            event.app_name, event.window_title, event.event_type, event.text
+                        )
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        match tasks[0].task_type {
+            TaskType::SemanticTextAnalysis => {
+                let outputs = provider.analyze_text_batch(&contexts).or_else(|_| {
+                    contexts
+                        .iter()
+                        .map(|context| provider.analyze_text(context))
+                        .collect()
+                })?;
+                for (task, output) in tasks.iter().zip(outputs) {
+                    persist_semantic_result(&database, task, &provider, output)?;
+                }
+            }
+            TaskType::EmbeddingGeneration => {
+                let embeddings = provider.embed_batch(&contexts).or_else(|_| {
+                    contexts
+                        .iter()
+                        .map(|context| provider.embed(context))
+                        .collect()
+                })?;
+                for (task, embedding) in tasks.iter().zip(embeddings) {
+                    let semantic_id = database
+                        .lock()
+                        .map_err(|_| "database lock poisoned")?
+                        .semantic_for_raw_event(&task.raw_event_id)
+                        .map_err(|e| e.to_string())?
+                        .ok_or("semantic event not found")?
+                        .id;
+                    database
+                        .lock()
+                        .map_err(|_| "database lock poisoned")?
+                        .insert_embedding(&semantic_id, &provider.nomic_model, "ollama", &embedding)
+                        .map_err(|e| e.to_string())?;
+                }
+            }
+            TaskType::SemanticImageAnalysis => unreachable!(),
+        }
+        Ok(())
+    }
 }
 
 pub fn run_processing_worker(
@@ -225,21 +299,37 @@ pub fn run_processing_worker(
                 }
                 break;
             }
-            let processing_result = catch_unwind(AssertUnwindSafe(|| processor.process(&task)))
-                .unwrap_or_else(|_| Err("processing provider panicked".into()));
+            let mut tasks = vec![task];
+            let task_type = tasks[0].task_type.clone();
+            if task_type != TaskType::SemanticImageAnalysis {
+                if let Ok(database) = database.lock() {
+                    if let Ok(mut additional) =
+                        database.claim_next_tasks(&task_type, MAX_MODEL_BATCH_SIZE - 1)
+                    {
+                        tasks.append(&mut additional);
+                    }
+                }
+            }
+            let processing_result =
+                catch_unwind(AssertUnwindSafe(|| processor.process_batch(&tasks)))
+                    .unwrap_or_else(|_| Err("processing provider panicked".into()));
             match processing_result {
                 Ok(()) => {
                     if let Ok(database) = database.lock() {
-                        let _ = database.finish_task(&task.id);
+                        for task in &tasks {
+                            let _ = database.finish_task(&task.id);
+                        }
                     }
                 }
                 Err(error) => {
-                    let retry = task.attempts < MAX_RETRY_ATTEMPTS;
                     if let Ok(database) = database.lock() {
-                        let _ = database.fail_task(&task.id, &error, retry, task.attempts);
+                        for task in &tasks {
+                            let retry = task.attempts < MAX_RETRY_ATTEMPTS;
+                            let _ = database.fail_task(&task.id, &error, retry, task.attempts);
+                        }
                     }
-                    if retry {
-                        thread::sleep(retry_delay(task.attempts));
+                    if tasks.iter().any(|task| task.attempts < MAX_RETRY_ATTEMPTS) {
+                        thread::sleep(retry_delay(tasks[0].attempts));
                     }
                 }
             }
