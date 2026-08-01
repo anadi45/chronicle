@@ -1,26 +1,28 @@
-//! Windows low-level mouse hook boundary.
+//! Windows low-level mouse/keyboard hook boundary.
 //!
 //! The OS callback is intentionally tiny: it copies the event data into a
-//! channel and immediately returns. Database writes happen on the hook worker
-//! thread so the Windows input callback never blocks the desktop or other
-//! applications.
+//! channel and immediately returns. Mouse movement is never captured — only
+//! discrete clicks, scroll, and key presses reach the channel, so ordinary
+//! use never floods the pipeline. The hook thread's job is to pump Windows
+//! messages (required for the low-level hook to keep receiving callbacks)
+//! and forward drained messages to the shared capture-writer channel; it
+//! never touches the database itself, so a slow database write can never
+//! stall the message pump and delay input for the rest of the system.
 
-#[cfg(windows)]
-use super::normalize_keyboard_event;
-#[cfg(windows)]
-use super::normalize_mouse_event;
-#[cfg(windows)]
-use crate::local_sqlite_event_database::Database;
-#[cfg(windows)]
+use super::{normalize_keyboard_event, normalize_mouse_event};
+use crate::capture_writer::mark_input_activity;
+use crate::local_sqlite_event_database::RawEvent;
 use std::sync::atomic::{AtomicBool, Ordering};
-#[cfg(windows)]
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
-#[cfg(windows)]
 use std::thread;
-#[cfg(windows)]
 use std::time::{Duration, Instant};
 
-#[cfg(windows)]
+/// How often the hook thread checks for a drained message when idle. Small
+/// enough to keep `pump_window_messages` running frequently (the low-level
+/// hook mechanism depends on this thread's message queue staying serviced),
+/// large enough to avoid a busy spin.
+const IDLE_POLL_INTERVAL: Duration = Duration::from_millis(8);
+
 #[derive(Clone, Copy)]
 struct MouseMessage {
     event_type: &'static str,
@@ -29,35 +31,32 @@ struct MouseMessage {
     button: Option<&'static str>,
 }
 
-#[cfg(windows)]
+// Write-once outer cell, mutable inner slot: lets a hook be stopped and
+// later restarted (settings toggled off/on) without the second `start_*`
+// call silently failing to register a sender, which is what happened when
+// this used `OnceLock::set` directly.
 static MOUSE_SENDER: OnceLock<Mutex<Option<mpsc::Sender<MouseMessage>>>> = OnceLock::new();
 
-#[cfg(windows)]
 static KEYBOARD_SENDER: OnceLock<Mutex<Option<mpsc::Sender<u32>>>> = OnceLock::new();
 
-#[cfg(windows)]
 pub fn start_keyboard_hook(
-    database: Arc<Mutex<Database>>,
+    writer: mpsc::Sender<RawEvent>,
     stop: Arc<AtomicBool>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let (sender, receiver) = mpsc::channel();
-        let _ = KEYBOARD_SENDER.set(Mutex::new(Some(sender)));
+        *KEYBOARD_SENDER.get_or_init(|| Mutex::new(None)).lock().unwrap() = Some(sender);
         let hook = unsafe { install_keyboard_hook() };
         while !stop.load(Ordering::Relaxed) {
             pump_window_messages();
-            if let Ok(key_code) = receiver.recv_timeout(Duration::from_millis(100)) {
-                let event = normalize_keyboard_event("key_down", key_code, None, None);
-                match database.lock() {
-                    Ok(database) => {
-                        if let Err(error) = database.insert_event_and_enqueue(&event) {
-                            tracing::warn!(%error, event_id = %event.id, "failed to persist keyboard event");
-                        }
-                    }
-                    Err(error) => {
-                        tracing::warn!(%error, "failed to lock database for keyboard event")
-                    }
+            match receiver.try_recv() {
+                Ok(key_code) => {
+                    mark_input_activity();
+                    let event = normalize_keyboard_event("key_down", key_code, None, None);
+                    let _ = writer.send(event);
                 }
+                Err(mpsc::TryRecvError::Empty) => thread::sleep(IDLE_POLL_INTERVAL),
+                Err(mpsc::TryRecvError::Disconnected) => break,
             }
         }
         if !hook.is_invalid() {
@@ -73,13 +72,11 @@ pub fn start_keyboard_hook(
     })
 }
 
-#[cfg(windows)]
 unsafe fn install_keyboard_hook() -> windows::Win32::UI::WindowsAndMessaging::HHOOK {
     use windows::Win32::UI::WindowsAndMessaging::{SetWindowsHookExW, WH_KEYBOARD_LL};
     SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_callback), None, 0).unwrap_or_default()
 }
 
-#[cfg(windows)]
 unsafe extern "system" fn keyboard_callback(
     code: i32,
     wparam: windows::Win32::Foundation::WPARAM,
@@ -101,51 +98,43 @@ unsafe extern "system" fn keyboard_callback(
     CallNextHookEx(None, code, wparam, lparam)
 }
 
-#[cfg(windows)]
 pub fn start_mouse_hook(
-    database: Arc<Mutex<Database>>,
+    writer: mpsc::Sender<RawEvent>,
     stop: Arc<AtomicBool>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let (sender, receiver) = mpsc::channel();
-        let _ = MOUSE_SENDER.set(Mutex::new(Some(sender)));
+        *MOUSE_SENDER.get_or_init(|| Mutex::new(None)).lock().unwrap() = Some(sender);
         let hook = unsafe { install_hook() };
-        let mut left_down: Option<(i32, i32)> = None;
         let mut last_left_click: Option<(Instant, i32, i32)> = None;
         while !stop.load(Ordering::Relaxed) {
             pump_window_messages();
-            if let Ok(message) = receiver.recv_timeout(Duration::from_millis(100)) {
-                let mut event_type = message.event_type;
-                if message.event_type == "mouse_click" {
-                    if let Some((time, old_x, old_y)) = last_left_click {
-                        if time.elapsed() <= Duration::from_millis(500)
-                            && (old_x - message.x).abs() <= 4
-                            && (old_y - message.y).abs() <= 4
-                        {
-                            event_type = "mouse_double_click";
+            match receiver.try_recv() {
+                Ok(message) => {
+                    mark_input_activity();
+                    let mut event_type = message.event_type;
+                    if message.event_type == "mouse_click" {
+                        if let Some((time, old_x, old_y)) = last_left_click {
+                            if time.elapsed() <= Duration::from_millis(500)
+                                && (old_x - message.x).abs() <= 4
+                                && (old_y - message.y).abs() <= 4
+                            {
+                                event_type = "mouse_double_click";
+                            }
                         }
+                        last_left_click = Some((Instant::now(), message.x, message.y));
                     }
-                    last_left_click = Some((Instant::now(), message.x, message.y));
-                    left_down = Some((message.x, message.y));
-                } else if message.event_type == "mouse_move" {
-                    if let Some((down_x, down_y)) = left_down {
-                        if (down_x - message.x).abs() > 4 || (down_y - message.y).abs() > 4 {
-                            event_type = "mouse_drag_started";
-                        }
-                    }
-                } else if message.event_type == "mouse_left_up" && left_down.take().is_some() {
-                    event_type = "mouse_drag_ended";
+                    let event = normalize_mouse_event(
+                        event_type,
+                        message.x,
+                        message.y,
+                        message.button,
+                        None,
+                    );
+                    let _ = writer.send(event);
                 }
-                let event =
-                    normalize_mouse_event(event_type, message.x, message.y, message.button, None);
-                match database.lock() {
-                    Ok(database) => {
-                        if let Err(error) = database.insert_event_and_enqueue(&event) {
-                            tracing::warn!(%error, event_id = %event.id, "failed to persist mouse event");
-                        }
-                    }
-                    Err(error) => tracing::warn!(%error, "failed to lock database for mouse event"),
-                }
+                Err(mpsc::TryRecvError::Empty) => thread::sleep(IDLE_POLL_INTERVAL),
+                Err(mpsc::TryRecvError::Disconnected) => break,
             }
         }
         if !hook.is_invalid() {
@@ -161,7 +150,6 @@ pub fn start_mouse_hook(
     })
 }
 
-#[cfg(windows)]
 fn pump_window_messages() {
     use windows::Win32::UI::WindowsAndMessaging::{
         DispatchMessageW, PeekMessageW, TranslateMessage, MSG, PM_REMOVE,
@@ -175,13 +163,16 @@ fn pump_window_messages() {
     }
 }
 
-#[cfg(windows)]
 unsafe fn install_hook() -> windows::Win32::UI::WindowsAndMessaging::HHOOK {
     use windows::Win32::UI::WindowsAndMessaging::{SetWindowsHookExW, WH_MOUSE_LL};
     SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_callback), None, 0).unwrap_or_default()
 }
 
-#[cfg(windows)]
+/// Only discrete clicks and scroll are ever sent to the channel.
+/// `WM_MOUSEMOVE` (and button-up, which carries no new information once the
+/// down-click has already been recorded) are acknowledged to Windows via
+/// `CallNextHookEx` but never leave the callback — mouse movement must never
+/// become a persisted event or an AI queue task.
 unsafe extern "system" fn mouse_callback(
     code: i32,
     wparam: windows::Win32::Foundation::WPARAM,
@@ -189,30 +180,28 @@ unsafe extern "system" fn mouse_callback(
 ) -> windows::Win32::Foundation::LRESULT {
     use windows::Win32::UI::WindowsAndMessaging::CallNextHookEx;
     use windows::Win32::UI::WindowsAndMessaging::{
-        MSLLHOOKSTRUCT, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MOUSEMOVE, WM_MOUSEWHEEL,
-        WM_RBUTTONDOWN, WM_RBUTTONUP,
+        MSLLHOOKSTRUCT, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_MOUSEWHEEL, WM_RBUTTONDOWN,
     };
     if code >= 0 && lparam.0 != 0 {
         let data = &*(lparam.0 as *const MSLLHOOKSTRUCT);
-        let (event_type, button) = match wparam.0 as u32 {
-            WM_LBUTTONDOWN => ("mouse_click", Some("left")),
-            WM_RBUTTONDOWN => ("mouse_right_click", Some("right")),
-            WM_MBUTTONDOWN => ("mouse_click", Some("middle")),
-            WM_LBUTTONUP => ("mouse_left_up", Some("left")),
-            WM_RBUTTONUP => ("mouse_right_up", Some("right")),
-            WM_MOUSEMOVE => ("mouse_move", None),
-            WM_MOUSEWHEEL => ("mouse_scroll", None),
-            _ => ("mouse_input", None),
+        let message = match wparam.0 as u32 {
+            WM_LBUTTONDOWN => Some(("mouse_click", Some("left"))),
+            WM_RBUTTONDOWN => Some(("mouse_right_click", Some("right"))),
+            WM_MBUTTONDOWN => Some(("mouse_click", Some("middle"))),
+            WM_MOUSEWHEEL => Some(("mouse_scroll", None)),
+            _ => None,
         };
-        if let Some(slot) = MOUSE_SENDER.get() {
-            if let Ok(sender) = slot.lock() {
-                if let Some(sender) = sender.as_ref() {
-                    let _ = sender.send(MouseMessage {
-                        event_type,
-                        x: data.pt.x,
-                        y: data.pt.y,
-                        button,
-                    });
+        if let Some((event_type, button)) = message {
+            if let Some(slot) = MOUSE_SENDER.get() {
+                if let Ok(sender) = slot.lock() {
+                    if let Some(sender) = sender.as_ref() {
+                        let _ = sender.send(MouseMessage {
+                            event_type,
+                            x: data.pt.x,
+                            y: data.pt.y,
+                            button,
+                        });
+                    }
                 }
             }
         }

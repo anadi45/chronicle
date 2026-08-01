@@ -94,3 +94,12 @@ CREATE TABLE IF NOT EXISTS semantic_event_embeddings (
     embedding_blob BLOB,
     created_at TEXT NOT NULL
 );
+
+-- Hot-path lookups: newest-first raw event listing, per-raw-event semantic
+-- lookup (checked on every insert and every processing task), and per-event
+-- queue-status lookups from the UI and the dedupe check in
+-- enqueue_unprocessed_events. Without these, each grows linearly with table
+-- size and the effect compounds under capture load.
+CREATE INDEX IF NOT EXISTS raw_events_timestamp_idx ON raw_events(timestamp_ns DESC);
+CREATE INDEX IF NOT EXISTS semantic_events_raw_event_idx ON semantic_events(raw_event_id);
+CREATE INDEX IF NOT EXISTS processing_queue_raw_event_idx ON processing_queue(raw_event_id);

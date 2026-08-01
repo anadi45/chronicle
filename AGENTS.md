@@ -24,6 +24,7 @@ These rules apply to all work in this repository. They are intentionally strict 
 - Never use `unwrap()` in capture loops, command handlers, or worker threads. Convert failures into logged, non-fatal results where capture can continue.
 - Do not hold a database mutex across sleeps, Windows API waits, model calls, or filesystem operations.
 - All background threads need a stop signal and must be joined or safely detached during application shutdown.
+- Prefer stable, well-maintained libraries over in-house reimplementations. Before hand-rolling something a crate already solves — filesystem watching, vector similarity search, HTTP clients, connection pooling, event hooks — use the established crate (e.g. `notify` for filesystem events, `sqlite-vec` for vector search, `r2d2`/`r2d2_sqlite` for connection pooling, `windows-rs` for Win32 APIs like `SetWinEventHook`) unless there is a documented, specific reason it does not fit. In-house implementations are a last resort, not a default, and any exception must be justified in a code comment.
 
 ## Database and migrations
 

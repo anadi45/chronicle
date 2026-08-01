@@ -2,6 +2,7 @@
 mod activity_capture;
 #[allow(dead_code)]
 mod asynchronous_processing_queue;
+mod capture_writer;
 #[allow(dead_code)]
 mod embedding_provider;
 mod filesystem_activity_capture;
@@ -29,7 +30,10 @@ pub fn run() {
         .with_target(false)
         .init();
 
-    let state = AppState::initialize().expect("database initialization failed");
+    // Database open failures are recoverable: AppState::initialize() falls
+    // back to a transient in-memory database and records the failure so the
+    // UI can surface it, rather than panicking the whole process.
+    let state = AppState::initialize();
     tauri::Builder::default()
         .manage(state)
         .setup(|app| {
@@ -76,7 +80,8 @@ pub fn run() {
             tauri_application_commands::capture_diagnostics,
             tauri_application_commands::cancel_pending_processing_tasks,
             tauri_application_commands::retry_failed_processing_tasks,
-            tauri_application_commands::processing_status_for_event
+            tauri_application_commands::processing_status_for_event,
+            tauri_application_commands::startup_diagnostics
         ])
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
@@ -86,5 +91,8 @@ pub fn run() {
             }
         })
         .run(tauri::generate_context!())
-        .expect("error while running Chronicle");
+        .unwrap_or_else(|error| {
+            tracing::error!(%error, "Chronicle exited because the Tauri event loop failed to start");
+            std::process::exit(1);
+        });
 }

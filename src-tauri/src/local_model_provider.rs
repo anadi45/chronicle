@@ -4,10 +4,27 @@ use crate::local_semantic_processing::{
     parse_and_validate_model_json, validate_image_input, LocalSemanticAnalyzer, SemanticModelOutput,
 };
 use serde::{Deserialize, Serialize};
-use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::process::{Child, Command};
+use std::sync::OnceLock;
 use std::time::Duration;
+
+/// One keep-alive `ureq` agent shared by every provider instance and every
+/// worker thread. Reusing pooled connections instead of opening a fresh TCP
+/// connection per inference call removes a full connect + slow-start round
+/// trip from every request to the local model server, and `ureq` (unlike the
+/// previous hand-rolled client) correctly handles chunked transfer encoding
+/// and HTTP status codes instead of guessing from a raw byte split.
+fn shared_agent() -> &'static ureq::Agent {
+    static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
+    AGENT.get_or_init(|| {
+        ureq::Agent::config_builder()
+            .timeout_connect(Some(Duration::from_secs(2)))
+            .timeout_recv_response(Some(Duration::from_secs(60)))
+            .build()
+            .into()
+    })
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocalModelStatus {
@@ -179,34 +196,22 @@ impl OllamaLocalModelProvider {
         path: &str,
         body: &str,
     ) -> Result<T, String> {
-        let host = self
-            .endpoint
-            .strip_prefix("http://")
-            .ok_or("only local HTTP model endpoints are supported")?;
-        let address = host
-            .to_socket_addrs()
-            .map_err(|e| e.to_string())?
-            .next()
-            .ok_or("model endpoint unavailable")?;
-        let mut stream = TcpStream::connect_timeout(&address, Duration::from_secs(2))
-            .map_err(|e| format!("local model unavailable: {e}"))?;
-        stream.set_read_timeout(Some(Duration::from_secs(30))).ok();
-        let request = if method == "GET" {
-            format!("GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n")
+        let url = format!("{}{path}", self.endpoint);
+        let agent = shared_agent();
+        let mut response = if method == "GET" {
+            agent.get(&url).call()
         } else {
-            format!("POST {path} HTTP/1.1\r\nHost: {host}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len())
-        };
-        stream
-            .write_all(request.as_bytes())
-            .map_err(|e| e.to_string())?;
-        let mut bytes = Vec::new();
-        stream.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
-        let payload = String::from_utf8_lossy(&bytes)
-            .split("\r\n\r\n")
-            .nth(1)
-            .ok_or("invalid model response")?
-            .to_string();
-        serde_json::from_str(&payload).map_err(|e| format!("invalid model JSON: {e}"))
+            agent
+                .post(&url)
+                .header("Content-Type", "application/json")
+                .send(body.as_bytes())
+        }
+        .map_err(|error| format!("local model unavailable: {error}"))?;
+        let payload = response
+            .body_mut()
+            .read_to_string()
+            .map_err(|error| format!("invalid model response: {error}"))?;
+        serde_json::from_str(&payload).map_err(|error| format!("invalid model JSON: {error}"))
     }
 }
 impl LocalSemanticAnalyzer for OllamaLocalModelProvider {

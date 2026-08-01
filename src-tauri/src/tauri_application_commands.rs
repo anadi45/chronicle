@@ -9,7 +9,11 @@ use crate::asynchronous_processing_queue::{
     run_processing_worker, LocalModelQueueProcessor, MAX_PENDING_TASKS, MAX_RETRY_ATTEMPTS,
 };
 use crate::local_model_provider::{LocalModelStatus, OllamaLocalModelProvider};
-use crate::local_sqlite_event_database::{Database, RawEvent, SemanticEvent, SemanticEventView};
+use crate::local_sqlite_event_database::{
+    self, count_events_on, embedding_exists_on, processing_status_for_raw_event_on,
+    queue_counts_on, recent_events_on, recent_semantic_events_on, semantic_for_raw_event_on,
+    storage_counts_on, Database, ReaderPool, RawEvent, SemanticEvent, SemanticEventView,
+};
 use serde::Serialize;
 use std::process::Child;
 use std::sync::Mutex;
@@ -22,10 +26,21 @@ use tauri::State;
 
 pub struct AppState {
     pub database: Arc<Mutex<Database>>,
+    /// Read-only connection pool for UI query commands (list/search/count/
+    /// diagnostics), kept separate from the single writer connection above so
+    /// reads never contend with capture writes or each other.
+    pub reader_pool: Option<ReaderPool>,
     pub settings: Arc<Mutex<CaptureSettings>>,
     pub capture_stop: Mutex<Option<Arc<AtomicBool>>>,
     pub capture_threads: Mutex<Vec<JoinHandle<()>>>,
     pub ollama_process: Mutex<Option<Child>>,
+    /// Set when database initialization failed and a degraded in-memory
+    /// database is being used instead. Surfaced to the UI so a failed disk
+    /// database is a visible, recoverable error state rather than a crash.
+    pub startup_error: Option<String>,
+    /// Bounded, memory-only holding area for screenshots captured at focus
+    /// change so the AI queue can analyze the frame the user actually saw.
+    pub screenshot_cache: Arc<Mutex<crate::capture_writer::ScreenshotCache>>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -62,11 +77,40 @@ pub struct RawEventProcessingOverview {
 }
 
 impl AppState {
-    pub fn initialize() -> rusqlite::Result<Self> {
-        let database = Database::open()?;
-        database.seed_ready_event()?;
+    /// Builds application state. A database open failure is a recoverable
+    /// condition, not a process crash: this falls back to a transient
+    /// in-memory database (capture keeps working, just without persistence
+    /// across restarts) and records the failure in `startup_error` so the UI
+    /// can surface it instead of the app disappearing silently.
+    pub fn initialize() -> Self {
+        let (database, startup_error) = match Database::open() {
+            Ok(database) => (database, None),
+            Err(error) => {
+                tracing::error!(%error, "database initialization failed; falling back to an in-memory database");
+                let fallback = Database::open_in_memory_degraded().unwrap_or_else(|fallback_error| {
+                    // Even the in-memory fallback failed. This should be
+                    // effectively impossible (no I/O involved), but rather
+                    // than panic we degrade further: continue with no
+                    // persistence rather than crash the desktop shell.
+                    tracing::error!(%fallback_error, "in-memory fallback database also failed to initialize");
+                    Database::open_in_memory_degraded()
+                        .expect("in-memory sqlite connection is expected to always succeed")
+                });
+                (
+                    fallback,
+                    Some(format!(
+                        "Chronicle could not open its local database and is running in a temporary, non-persistent mode: {error}"
+                    )),
+                )
+            }
+        };
+        if let Err(error) = database.seed_ready_event() {
+            tracing::warn!(%error, "failed to seed initial ready event");
+        }
         let settings = database
-            .load_setting("capture")?
+            .load_setting("capture")
+            .ok()
+            .flatten()
             .and_then(|json| serde_json::from_str(&json).ok())
             .unwrap_or_default();
         let ollama_process = match OllamaLocalModelProvider::default().start_server_if_needed() {
@@ -76,13 +120,61 @@ impl AppState {
                 None
             }
         };
-        Ok(Self {
+        // Only pool connections to the on-disk file: when we fell back to an
+        // in-memory writer, a pooled reader would open an unrelated (or
+        // stale) chronicle.db file rather than the live in-memory database.
+        let reader_pool = if startup_error.is_none() {
+            match local_sqlite_event_database::open_reader_pool() {
+                Ok(pool) => Some(pool),
+                Err(error) => {
+                    tracing::warn!(%error, "failed to open read-only connection pool; read commands will fall back to the writer connection");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        Self {
             database: Arc::new(Mutex::new(database)),
+            reader_pool,
             settings: Arc::new(Mutex::new(settings)),
             capture_stop: Mutex::new(None),
             capture_threads: Mutex::new(Vec::new()),
             ollama_process: Mutex::new(ollama_process),
-        })
+            startup_error,
+            screenshot_cache: Arc::new(Mutex::new(crate::capture_writer::ScreenshotCache::new(32))),
+        }
+    }
+
+    /// Runs a read-only query off the UI thread. Prefers a pooled read-only
+    /// connection (see `ReaderPool`) so UI queries never contend with the
+    /// single writer mutex used by capture and processing; falls back to the
+    /// writer connection when no pool is available (e.g. degraded in-memory
+    /// startup). Always runs inside `spawn_blocking` so the async command
+    /// handler, and therefore the UI thread, is never blocked on rusqlite I/O.
+    async fn read_with<T, F>(&self, query: F) -> Result<T, String>
+    where
+        T: Send + 'static,
+        F: FnOnce(&rusqlite::Connection) -> rusqlite::Result<T> + Send + 'static,
+    {
+        if let Some(pool) = self.reader_pool.clone() {
+            tauri::async_runtime::spawn_blocking(move || {
+                let connection = pool.get().map_err(|error| error.to_string())?;
+                query(&connection).map_err(|error| error.to_string())
+            })
+            .await
+            .map_err(|error| error.to_string())?
+        } else {
+            let database = self.database.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                let database = database
+                    .lock()
+                    .map_err(|_| "database lock poisoned".to_owned())?;
+                query(database.connection()).map_err(|error| error.to_string())
+            })
+            .await
+            .map_err(|error| error.to_string())?
+        }
     }
 }
 
@@ -96,9 +188,9 @@ pub fn capture_active_window_screenshot(window_handle: isize) -> Result<Vec<u8>,
     #[cfg(windows)]
     {
         use crate::transient_screenshot_capture::{
-            ActiveWindowScreenshotProvider, WindowsActiveWindowScreenshotProvider,
+            ActiveWindowScreenshotProvider, PlatformActiveWindowScreenshotProvider,
         };
-        return WindowsActiveWindowScreenshotProvider { window_handle }.capture_active_window();
+        return PlatformActiveWindowScreenshotProvider { window_handle }.capture_active_window();
     }
     #[cfg(not(windows))]
     {
@@ -115,87 +207,71 @@ pub fn graphics_capture_session_available(window_handle: isize) -> Result<bool, 
 }
 
 #[tauri::command]
-pub fn recent_event_count(state: State<'_, AppState>) -> Result<i64, String> {
-    state
-        .database
-        .lock()
-        .map_err(|_| "database lock poisoned".to_owned())?
-        .count_events()
-        .map_err(|error| error.to_string())
+pub async fn recent_event_count(state: State<'_, AppState>) -> Result<i64, String> {
+    state.read_with(|connection| count_events_on(connection)).await
 }
 
 #[tauri::command]
-pub fn list_events(
+pub async fn list_events(
     state: State<'_, AppState>,
     limit: u32,
     query: Option<String>,
 ) -> Result<Vec<RawEvent>, String> {
+    let limit = limit.clamp(1, 500);
     state
-        .database
-        .lock()
-        .map_err(|_| "database lock poisoned".to_owned())?
-        .recent_events(limit.clamp(1, 500), query.as_deref())
-        .map_err(|error| error.to_string())
+        .read_with(move |connection| recent_events_on(connection, limit, query.as_deref()))
+        .await
 }
 
 #[tauri::command]
-pub fn list_semantic_events(
+pub async fn list_semantic_events(
     state: State<'_, AppState>,
     limit: u32,
     query: Option<String>,
 ) -> Result<Vec<SemanticEventView>, String> {
+    let limit = limit.clamp(1, 500);
     state
-        .database
-        .lock()
-        .map_err(|_| "database lock poisoned".to_owned())?
-        .recent_semantic_events(limit.clamp(1, 500), query.as_deref())
-        .map_err(|error| error.to_string())
+        .read_with(move |connection| recent_semantic_events_on(connection, limit, query.as_deref()))
+        .await
 }
 
 #[tauri::command]
-pub fn list_raw_event_processing_overview(
+pub async fn list_raw_event_processing_overview(
     state: State<'_, AppState>,
     limit: u32,
 ) -> Result<Vec<RawEventProcessingOverview>, String> {
-    let database = state
-        .database
-        .lock()
-        .map_err(|_| "database lock poisoned".to_owned())?;
-    database
-        .recent_events(limit.clamp(1, 500), None)
-        .map_err(|e| e.to_string())?
-        .into_iter()
-        .map(|event| {
-            let semantic = database
-                .semantic_for_raw_event(&event.id)
-                .map_err(|e| e.to_string())?;
-            let embedding_ready = match &semantic {
-                Some(value) => database
-                    .embedding_exists(&value.id)
-                    .map_err(|e| e.to_string())?,
-                None => false,
-            };
-            let processing = database
-                .processing_status_for_raw_event(&event.id)
-                .map_err(|e| e.to_string())?
+    let limit = limit.clamp(1, 500);
+    state
+        .read_with(move |connection| {
+            recent_events_on(connection, limit, None)?
                 .into_iter()
-                .map(
-                    |(task_type, status, attempts, error)| EventProcessingStatus {
-                        task_type,
-                        status,
-                        attempts,
-                        error,
-                    },
-                )
-                .collect();
-            Ok(RawEventProcessingOverview {
-                event,
-                processing,
-                semantic_ready: semantic.is_some(),
-                embedding_ready,
-            })
+                .map(|event| {
+                    let semantic = semantic_for_raw_event_on(connection, &event.id)?;
+                    let embedding_ready = match &semantic {
+                        Some(value) => embedding_exists_on(connection, &value.id)?,
+                        None => false,
+                    };
+                    let processing = processing_status_for_raw_event_on(connection, &event.id)?
+                        .into_iter()
+                        .map(
+                            |(task_type, status, attempts, error)| EventProcessingStatus {
+                                task_type,
+                                status,
+                                attempts,
+                                error,
+                            },
+                        )
+                        .collect();
+                    Ok(RawEventProcessingOverview {
+                        event,
+                        processing,
+                        semantic_ready: semantic.is_some(),
+                        embedding_ready,
+                    })
+                })
+                .collect()
         })
-        .collect()
+        .await
 }
 
 #[tauri::command]
@@ -222,26 +298,35 @@ pub fn record_semantic_event(
 }
 
 #[tauri::command]
-pub fn semantic_for_event(
+pub async fn semantic_for_event(
     state: State<'_, AppState>,
     raw_event_id: String,
 ) -> Result<Option<SemanticEvent>, String> {
     state
-        .database
-        .lock()
-        .map_err(|_| "database lock poisoned".to_owned())?
-        .semantic_for_raw_event(&raw_event_id)
-        .map_err(|error| error.to_string())
+        .read_with(move |connection| semantic_for_raw_event_on(connection, &raw_event_id))
+        .await
 }
 
 #[tauri::command]
-pub fn delete_all_data(state: State<'_, AppState>) -> Result<(), String> {
-    state
-        .database
-        .lock()
-        .map_err(|_| "database lock poisoned".to_owned())?
-        .delete_all()
-        .map_err(|error| error.to_string())
+pub async fn delete_all_data(state: State<'_, AppState>) -> Result<(), String> {
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        database
+            .lock()
+            .map_err(|_| "database lock poisoned".to_owned())?
+            .delete_all()
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// Reports whether database initialization degraded to an in-memory,
+/// non-persistent database (see `AppState::initialize`), so the UI can show
+/// a recoverable-error banner instead of the failure being silent.
+#[tauri::command]
+pub fn startup_diagnostics(state: State<'_, AppState>) -> Option<String> {
+    state.startup_error.clone()
 }
 
 #[tauri::command]
@@ -428,13 +513,17 @@ pub fn set_watched_folders(
 }
 
 #[tauri::command]
-pub fn export_data(state: State<'_, AppState>) -> Result<String, String> {
-    state
-        .database
-        .lock()
-        .map_err(|_| "database lock poisoned".to_owned())?
-        .export_json()
-        .map_err(|error| error.to_string())
+pub async fn export_data(state: State<'_, AppState>) -> Result<String, String> {
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        database
+            .lock()
+            .map_err(|_| "database lock poisoned".to_owned())?
+            .export_json()
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 pub fn start_capture_state(state: &AppState) -> Result<(), String> {
@@ -478,6 +567,7 @@ pub fn start_capture_state(state: &AppState) -> Result<(), String> {
         stop.clone(),
         Arc::new(LocalModelQueueProcessor {
             database: state.database.clone(),
+            screenshot_cache: state.screenshot_cache.clone(),
         }),
     ));
     threads.push(crate::filesystem_activity_capture::start_filesystem_loop(
@@ -485,17 +575,27 @@ pub fn start_capture_state(state: &AppState) -> Result<(), String> {
         stop.clone(),
         state.settings.clone(),
     ));
+    // Mouse/keyboard hook callbacks must never block on the database lock
+    // (that would stall the OS message pump and visibly lag input for the
+    // whole system), so they send normalized events down a channel to a
+    // single batching writer thread instead of writing directly.
+    let (writer_sender, writer_receiver) = std::sync::mpsc::channel();
+    threads.push(crate::capture_writer::start_capture_writer(
+        state.database.clone(),
+        state.settings.clone(),
+        writer_receiver,
+    ));
     #[cfg(windows)]
     if mouse_enabled {
-        threads.push(crate::input_capture::windows::start_mouse_hook(
-            state.database.clone(),
+        threads.push(crate::input_capture::start_mouse_hook(
+            writer_sender.clone(),
             stop.clone(),
         ));
     }
     #[cfg(windows)]
     if keyboard_enabled {
-        threads.push(crate::input_capture::windows::start_keyboard_hook(
-            state.database.clone(),
+        threads.push(crate::input_capture::start_keyboard_hook(
+            writer_sender.clone(),
             stop.clone(),
         ));
     }
@@ -520,7 +620,7 @@ pub fn start_capture(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn capture_status(state: State<'_, AppState>) -> Result<CaptureStatus, String> {
+pub async fn capture_status(state: State<'_, AppState>) -> Result<CaptureStatus, String> {
     let enabled = state
         .settings
         .lock()
@@ -531,12 +631,7 @@ pub fn capture_status(state: State<'_, AppState>) -> Result<CaptureStatus, Strin
         .lock()
         .map_err(|_| "capture lock poisoned".to_owned())?
         .is_some();
-    let persisted_event_count = state
-        .database
-        .lock()
-        .map_err(|_| "database lock poisoned".to_owned())?
-        .count_events()
-        .map_err(|error| error.to_string())?;
+    let persisted_event_count = state.read_with(|connection| count_events_on(connection)).await?;
     Ok(CaptureStatus {
         enabled,
         active,
@@ -545,35 +640,29 @@ pub fn capture_status(state: State<'_, AppState>) -> Result<CaptureStatus, Strin
     })
 }
 
-#[tauri::command]
-pub fn processing_queue_status(
-    state: State<'_, AppState>,
-) -> Result<ProcessingQueueStatus, String> {
-    let counts = state
-        .database
-        .lock()
-        .map_err(|_| "database lock poisoned".to_owned())?
-        .queue_counts()
-        .map_err(|error| error.to_string())?;
-    Ok(ProcessingQueueStatus {
+fn to_queue_status(counts: std::collections::HashMap<String, i64>) -> ProcessingQueueStatus {
+    ProcessingQueueStatus {
         pending: *counts.get("pending").unwrap_or(&0),
         processing: *counts.get("processing").unwrap_or(&0),
         complete: *counts.get("complete").unwrap_or(&0),
         failed: *counts.get("failed").unwrap_or(&0),
         cancelled: *counts.get("cancelled").unwrap_or(&0),
-    })
+    }
 }
 
 #[tauri::command]
-pub fn storage_usage(
+pub async fn processing_queue_status(
+    state: State<'_, AppState>,
+) -> Result<ProcessingQueueStatus, String> {
+    let counts = state.read_with(|connection| queue_counts_on(connection)).await?;
+    Ok(to_queue_status(counts))
+}
+
+#[tauri::command]
+pub async fn storage_usage(
     state: State<'_, AppState>,
 ) -> Result<std::collections::HashMap<String, i64>, String> {
-    state
-        .database
-        .lock()
-        .map_err(|_| "database lock poisoned".to_owned())?
-        .storage_counts()
-        .map_err(|error| error.to_string())
+    state.read_with(|connection| storage_counts_on(connection)).await
 }
 
 #[derive(Debug, Serialize)]
@@ -585,8 +674,7 @@ pub struct ModelProviderStatus {
     pub local_models: LocalModelStatus,
 }
 
-#[tauri::command]
-pub fn model_provider_status() -> ModelProviderStatus {
+fn model_provider_status_blocking() -> ModelProviderStatus {
     let provider = OllamaLocalModelProvider::default();
     let local_models = provider.status();
     ModelProviderStatus {
@@ -596,6 +684,15 @@ pub fn model_provider_status() -> ModelProviderStatus {
         embedding_available: local_models.nomic_available,
         local_models,
     }
+}
+
+/// Queries local model availability, which involves a blocking HTTP call to
+/// the Ollama server. Runs off the UI thread via `spawn_blocking`.
+#[tauri::command]
+pub async fn model_provider_status() -> Result<ModelProviderStatus, String> {
+    tauri::async_runtime::spawn_blocking(model_provider_status_blocking)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[derive(Debug, Serialize)]
@@ -621,64 +718,62 @@ pub struct CaptureDiagnostics {
 }
 
 #[tauri::command]
-pub fn capture_diagnostics(state: State<'_, AppState>) -> Result<CaptureDiagnostics, String> {
+pub async fn capture_diagnostics(state: State<'_, AppState>) -> Result<CaptureDiagnostics, String> {
     let settings = state
         .settings
         .lock()
         .map_err(|_| "settings lock poisoned".to_owned())?
         .clone();
-    let database = state
-        .database
-        .lock()
-        .map_err(|_| "database lock poisoned".to_owned())?;
-    let counts = database.queue_counts().map_err(|error| error.to_string())?;
+    let storage = state.read_with(|connection| storage_counts_on(connection)).await?;
+    let counts = state.read_with(|connection| queue_counts_on(connection)).await?;
+    let providers =
+        tauri::async_runtime::spawn_blocking(model_provider_status_blocking)
+            .await
+            .map_err(|error| error.to_string())?;
     Ok(CaptureDiagnostics {
         settings,
-        storage: database
-            .storage_counts()
-            .map_err(|error| error.to_string())?,
-        queue: ProcessingQueueStatus {
-            pending: *counts.get("pending").unwrap_or(&0),
-            processing: *counts.get("processing").unwrap_or(&0),
-            complete: *counts.get("complete").unwrap_or(&0),
-            failed: *counts.get("failed").unwrap_or(&0),
-            cancelled: *counts.get("cancelled").unwrap_or(&0),
-        },
-        providers: model_provider_status(),
+        storage,
+        queue: to_queue_status(counts),
+        providers,
     })
 }
 
 #[tauri::command]
-pub fn cancel_pending_processing_tasks(state: State<'_, AppState>) -> Result<usize, String> {
-    state
-        .database
-        .lock()
-        .map_err(|_| "database lock poisoned".to_owned())?
-        .cancel_pending_tasks()
-        .map_err(|error| error.to_string())
+pub async fn cancel_pending_processing_tasks(state: State<'_, AppState>) -> Result<usize, String> {
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        database
+            .lock()
+            .map_err(|_| "database lock poisoned".to_owned())?
+            .cancel_pending_tasks()
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-pub fn retry_failed_processing_tasks(state: State<'_, AppState>) -> Result<usize, String> {
-    state
-        .database
-        .lock()
-        .map_err(|_| "database lock poisoned".to_owned())?
-        .retry_failed_tasks()
-        .map_err(|error| error.to_string())
+pub async fn retry_failed_processing_tasks(state: State<'_, AppState>) -> Result<usize, String> {
+    let database = state.database.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        database
+            .lock()
+            .map_err(|_| "database lock poisoned".to_owned())?
+            .retry_failed_tasks()
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-pub fn processing_status_for_event(
+pub async fn processing_status_for_event(
     state: State<'_, AppState>,
     raw_event_id: String,
 ) -> Result<Vec<EventProcessingStatus>, String> {
     let rows = state
-        .database
-        .lock()
-        .map_err(|_| "database lock poisoned".to_owned())?
-        .processing_status_for_raw_event(&raw_event_id)
-        .map_err(|error| error.to_string())?;
+        .read_with(move |connection| processing_status_for_raw_event_on(connection, &raw_event_id))
+        .await?;
     Ok(rows
         .into_iter()
         .map(

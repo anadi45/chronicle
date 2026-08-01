@@ -1,155 +1,131 @@
 # Chronicle implementation roadmap
 
-This file is the working implementation checklist. Update it when a feature is started, verified, or blocked.
+Working checklist for Chronicle's implementation. Update it whenever a task moves between pending, in progress, or complete — this file should always reflect the true state of the code, not the intended state.
 
-Legend: `[x]` complete, `[~]` in progress, `[ ]` pending.
+Legend: `[x]` complete · `[~]` in progress · `[ ]` pending
 
-## Completed
+---
+
+## 1. Desktop shell and persistence
 
 - [x] Tauri + React desktop shell
 - [x] Rust backend with SQLite initialization
 - [x] Raw event schema and typed `RawEvent` model
 - [x] SQLite FTS5 search and maintenance triggers
-- [x] Timeline and Search views
-- [x] Settings/privacy view foundation
+- [x] Timeline, Search, Raw Evidence, and Settings/privacy views
 - [x] Event recording, listing, searching, counting, deletion, and JSON export commands
 - [x] Persistent capture settings table
-- [x] Capture provider contracts
-- [x] Queue task/status contracts and exponential retry policy
-- [x] Foreground-window polling lifecycle and Start/Stop commands
-- [x] Rust repository/capture/queue tests
-- [x] TypeScript validation and production frontend build
+- [x] Seed event for first-run health verification
 - [x] Windows WebView2 development startup fix
-- [x] Descriptive module names and module-level Rustdoc
-- [x] Platform capture folders with shared `mod.rs` and Windows extension modules
-- [x] Preserve native foreground window handles in raw events
+- [x] Descriptive, responsibility-named modules with module-level Rustdoc
 
-## Current priority: capture engine
+## 2. Data layer and reliability
 
-- [x] Enrich foreground events with executable name and executable path
-- [x] Persist capture enabled state when Start/Stop is used
-- [x] Automatically restart capture workers when persisted capture is enabled
-- [x] Add foreground provider shutdown on application exit
-- [x] Add application exclusion matching and tests
-- [x] Add process/window handle fields to the public event model
-- [x] Add capture status and last-event health to the UI
+- [x] `sqlite-vec` ANN vector similarity search, with a durable binary/JSON brute-force fallback when the extension is unavailable or a query vector's dimensionality doesn't match the index
+- [x] `r2d2`/`r2d2_sqlite` read-only connection pool, separate from the single writer connection, so UI reads never contend with capture writes
+- [x] Async Tauri commands (`spawn_blocking`) for DB, model-status, and export work — the UI thread is never blocked on rusqlite or Ollama HTTP calls
+- [x] Recoverable database-init failure handling: a failed on-disk database open falls back to a transient in-memory database and is surfaced to the UI via `startup_diagnostics`, instead of panicking the process
+- [x] WAL journal mode, `synchronous=NORMAL`, `busy_timeout`, and indexes on hot lookup paths (recent events, per-event semantic/queue status)
+- [x] All capture sources write through one batching writer thread (`capture_writer`) instead of touching SQLite directly
 
-## Input capture
+## 3. Capture engine
 
-- [x] Add explicit keyboard permission/on-off flow
-- [x] Implement metadata-only keyboard hook
-- [x] Add Windows low-level keyboard hook worker
-- [x] Add normalized keyboard/mouse event contracts and privacy metadata
-- [x] Persist independent keyboard/mouse permission settings
-- [x] Implement allowlisted text capture contract
-- [x] Enforce allowlist during keyboard event normalization
-- [x] Preserve keyboard allowlist compatibility for existing settings
-- [x] Persist keyboard allowlist in capture settings
-- [x] Add command to configure keyboard text allowlist
-- [x] Add protected-field/password/security exclusions
-- [x] Add protected-field/password/security exclusions for UI Automation
-- [x] Add text batching contract and 500–1000 ms debounce bounds
-- [x] Implement mouse click, double-click, right-click, scroll, and drag events
-- [x] Add isolated Windows low-level mouse hook worker
-- [x] Wire mouse hook into capture start/stop lifecycle
-- [x] Add Windows message pump and mouse click/double-click/scroll/drag state handling
-- [ ] Add keyboard/mouse acceptance tests on Windows
+- [x] Foreground-window tracking via `SetWinEventHook` (`EVENT_SYSTEM_FOREGROUND`), replacing `GetForegroundWindow` polling
+- [x] Filesystem watching via the `notify` crate (`ReadDirectoryChangesW` on Windows), replacing periodic recursive rescans
+- [x] Enrich foreground events with executable name and executable path; preserve native window handles
+- [x] Persist capture enabled state; automatically restart capture workers on launch when previously enabled
+- [x] Application exclusion matching, exact executable filename/stem (case-insensitive), not raw substring — an exclusion of "code" matches `Code.exe` but not `decode.exe`
+- [x] Path exclusion matching by path-component containment, not raw substring — an exclusion of "secrets" matches the `\Secrets\` segment but not `\Secretariat\`
+- [x] Capture status and last-event health surfaced in the UI
 
-## UI Automation and filesystem
+## 4. Input capture (mouse/keyboard)
 
-- [x] Read focused UI Automation element
-- [x] Capture control type, name, class, framework, and bounds
-- [x] Capture selected text where available
-- [x] Bound selected text and control values before persistence
-- [x] Add graceful fallback for inaccessible/elevated applications
-- [x] Add watched-folder selection
-- [x] Implement create/modify/delete/rename notifications
-- [x] Add path exclusions
-- [x] Test case-insensitive path exclusions
-- [x] Preserve path exclusion compatibility for existing settings
-- [x] Add filesystem snapshot tests
+- [x] Explicit keyboard permission/on-off flow; independent keyboard/mouse permission settings
+- [x] Metadata-only keyboard hook; low-level Windows keyboard and mouse hook workers
+- [x] Mouse click, double-click, right-click, and scroll events — movement is never captured or analyzed
+- [x] Windows message pump isolated from the hook callback so a slow database write can never stall system-wide input
+- [x] Allowlisted text capture contract, enforced during keyboard event normalization
+- [x] Protected-field/password/security exclusions (raw hooks and UI Automation)
+- [x] Text batching contract with 500–1000 ms debounce bounds
+- [x] Input hook restart bug fixed (`OnceLock` sender is now re-armable after stop/start via a mutex-guarded slot)
+- [ ] Keyboard/mouse acceptance tests on Windows
 
-## Screenshots and transient assets
+## 5. UI Automation and filesystem
 
-- [x] Integrate Windows Graphics Capture capability probe and D3D11 frame-pool readback; retain CPU/GDI fallback for unsupported windows
-- [x] Dispatch screenshot capture after meaningful events
-- [x] Keep image bytes in memory only by default
-- [x] Associate transient assets with raw events/queue tasks
-- [x] Release assets after processing or failure
-- [x] Keep debug screenshot retention disabled by default
-- [x] Add screenshot privacy and failure tests
-- [x] Add transient screenshot expiry test
+- [x] Read focused UI Automation element: control type, name, class, framework, bounds, selected text
+- [x] Bound selected text and control values before persistence; graceful fallback for inaccessible/elevated applications
+- [x] Watched-folder selection; create/modify/delete/rename notifications; path exclusions
+- [x] Filesystem snapshot and case-insensitive path exclusion tests
 
-## Processing Queue
+## 6. Screenshots and transient assets
 
-- [x] Add queue insert/claim/complete/fail repository methods
-- [x] Add bounded worker loop
-- [x] Add queue retry limit and worker stop handling
-- [x] Add crash recovery for `processing` tasks
-- [x] Requeue claimed work during graceful worker shutdown
-- [x] Add retry count and retry timestamp persistence
-- [x] Test retry timestamp scheduling
-- [x] Add queue backlog/progress commands
-- [x] Add cancellation and backpressure
-- [x] Add cancellation for pending queue tasks
-- [x] Add bounded queue backpressure
-- [x] Test capture while workers are busy
-- [x] Test bounded work while processing workers are busy
-- [x] Batch bounded semantic analysis and embedding inference requests
-- [x] Preserve per-event queue completion/retry state for batched inference
+- [x] Windows Graphics Capture probe with D3D11 frame-pool readback; CPU/GDI fallback for unsupported windows
+- [x] Screenshot captured at event time (foreground focus change) into a bounded in-memory cache, not re-captured at processing time
+- [x] Image bytes held in memory only by default; released after processing or failure
+- [x] Screenshot privacy, failure, and transient-expiry tests
 
-## Local AI and semantic events
+## 7. Processing queue and local AI
 
-- [x] Add Gemma provider configuration and Ollama model discovery
-- [x] Wire Gemma/Nomic provider calls into queue tasks and persist outputs
-- [x] Implement structured text analysis validation boundary
-- [x] Implement image analysis input validation contract
-- [x] Validate model JSON output boundary
-- [x] Add processing metrics contract
-- [x] Add processing metrics counters
-- [x] Add processing latency/error metrics contract
-- [x] Add processing metrics snapshot/reset operations
-- [x] Add average processing latency accessor
-- [x] Add processing model metadata fields
-- [x] Ensure AI failures never stop capture
-- [x] Add Nomic Embed Text provider adapter
-- [~] Add sqlite-vec storage and similarity search
-- [x] Add durable binary embedding storage fallback with JSON compatibility
-- [x] Add hybrid FTS5/vector ranking
+- [x] Queue insert/claim/complete/fail repository methods; bounded worker loop; retry limit and stop handling
+- [x] Crash recovery for `processing` tasks; requeue on graceful shutdown; retry count/timestamp persistence
+- [x] Cancellation and bounded backpressure for pending tasks
+- [x] Gemma provider configuration and Ollama model discovery; Nomic Embed Text adapter
+- [x] Structured text/image analysis validation boundaries; model JSON output validated before persistence
+- [x] Bounded homogeneous batching (up to 8 items) with per-event retry/status tracking preserved across batch fallback
+- [x] AI worker paces itself between batches and steps aside while the user is actively clicking/typing
+- [x] Ollama client uses a keep-alive `ureq` agent with status-code checks and correct chunked-response handling
+- [x] Hybrid FTS5/vector ranking; durable binary embedding fallback with JSON compatibility
+- [x] Processing metrics (latency, error counters, snapshot/reset)
 
-## UI completion
+## 8. UI and diagnostics
 
-- [x] Replace raw-event FTS search with semantic-event FTS search
-- [x] Add separate Raw Evidence page and Timeline CTA
-- [x] Hide raw capture events from Timeline/Search; show only persisted LLM-processed insights
-- [x] Event inspector with raw JSON and source evidence
-- [x] Semantic event persistence and model metadata
-- [x] Queue status view in diagnostics panel
-- [x] Permission diagnostics page
-- [x] Add consolidated permission diagnostics command
-- [x] Watched-folder and excluded-application editors
-- [x] Wire export button to browser download
-- [x] Wire delete-all button with confirmation
-- [x] Add storage usage command
-- [x] Add model/provider status command
-- [x] Add processing queue limits command
-- [x] Centralize processing queue limits
+- [x] Semantic-event FTS search; Timeline/Search show only processed insights, never raw capture
+- [x] Separate Raw Evidence page; event inspector with raw JSON and source evidence
+- [x] Queue status and permission diagnostics panel; consolidated diagnostics command
+- [x] Watched-folder, excluded-application, and excluded-path editors (independent, not conflated)
+- [x] Export-to-JSON and delete-all wired to the UI with confirmation
+- [x] Storage usage, model/provider status, and processing queue limits commands
 
-## Hardening and release
+## 9. Hardening and release
 
-- [~] Add end-to-end Windows capture tests; reproducible foreground-event acceptance harness is available, restricted/elevated scenarios remain manual
-- [~] Benchmark raw persistence, queue latency, search, and frontend build; native screenshot timing remains environment-dependent
-- [x] Add bounded FTS search baseline at 1,000 events
-- [x] Add raw persistence and queue latency baselines
-- [x] Add reproducible Windows release smoke-test workflow
-- [x] Test 1,000+ events and memory growth baseline
-- [x] Test forced termination and queue recovery
-- [ ] Test elevated apps, UAC, secure desktop, protected windows, and games
-- [x] Add Windows installer icon/resources
-- [ ] Test Windows Defender/antivirus interactions
-- [x] Document permissions and privacy behavior
-- [x] Document current permissions and privacy behavior
-- [x] Finalize export/delete/data-retention policy
+- [x] Bounded FTS search baseline at 1,000 events; raw persistence and queue latency baselines
+- [x] Reproducible Windows release smoke-test workflow; Windows installer icon/resources
+- [x] Forced-termination and queue-recovery test; 1,000+ event and memory-growth baseline
+- [~] End-to-end Windows capture tests — a reproducible foreground-event acceptance harness exists; restricted/elevated scenarios remain manual
+- [~] Benchmarks for persistence, queue latency, search, and frontend build — native screenshot timing remains environment-dependent
+- [ ] Elevated apps, UAC, secure desktop, protected windows, and games
+- [ ] Windows Defender/antivirus interaction testing
+
+---
+
+## Known issues
+
+Tracked defects that are understood but not yet fixed. Verify current behavior before relying on this list — it reflects the last audit, not a continuously re-checked state.
+
+- [ ] **Raw-event search ignores its query.** `Database::recent_events(limit, query)` never applies `query` — a regression test (`raw_event_listing_does_not_search_private_evidence`) currently encodes this as expected behavior. Either implement filtering on raw evidence or remove the unused parameter.
+- [ ] **Input-hook events carry no app identity.** Mouse/keyboard hook events don't set `app_name`/`executable_path`, so `excluded_applications` cannot filter them — exclusions are only enforced for foreground/filesystem events today. This is a privacy-invariant gap worth closing.
+- [ ] **Keyboard text allowlist is not wired to the live hook.** `MetadataTextBatcher`, `normalize_allowlisted_keyboard_event`, and `KeyboardMode::AllowlistedText`/`FullText` exist but the keyboard hook always calls the metadata-only normalizer — the Settings allowlist editor currently has no effect on capture.
+- [ ] **Queue-full behavior misreports raw-event persistence.** When the queue is at its cap, `enqueue_task` fails and `insert_event_and_enqueue` surfaces that as "failed to persist" even though the raw event was written successfully.
+- [ ] **Shutdown can block on a long-running model call.** `CloseRequested` joins capture/worker threads on the main thread; if the AI worker is mid-read on a slow model response, app close can stall until that read completes or times out.
+- [ ] **FTS queries can raise a syntax error on ordinary input.** Only `"` is stripped before building the `MATCH` query; characters like `-`/`*` or an unbalanced quote can produce an FTS5 syntax error that the client currently swallows into an empty result list instead of surfacing.
+- [ ] **JSON export is raw-events-only.** `export_json` exports raw events (capped at 100k) but not semantic events, embeddings, or settings, while the UI presents "Export JSON" as a full local data export.
+- [ ] **`record_event` trusts its caller.** Any webview-side code can insert arbitrary raw events and enqueue AI work through this command; acceptable within the current single-user local-trust model, but worth revisiting if a plugin/extension surface is ever added.
+- [ ] **Mixed processing-queue batches only advance the first task when an image task is present**, leaving the rest in `processing` until the stale-task recovery sweep picks them up.
+
+## Future scope
+
+Not started. Candidates for the next phase of work, roughly in priority order.
+
+- [ ] Rewrite `list_raw_event_processing_overview` as JOIN queries instead of one query plus N per-event lookups.
+- [ ] Push-based UI updates (Tauri events for new insights / queue-count changes) instead of manual refresh and mount-time-only fetches.
+- [ ] Virtualize the Timeline list once result sets grow beyond a few hundred rows.
+- [ ] Stream `export_data` to a user-chosen file instead of building the full JSON string in memory.
+- [ ] Idle-aware processing that pauses the queue worker during sustained active input and resumes on idle, beyond the existing per-batch pacing.
+- [ ] macOS capture providers (`mac.rs` modules are currently minimal stubs behind `cfg(not(windows))`) — no timeline commitment; Chronicle remains Windows-first.
+- [ ] sqlite-vec index maintenance tooling (rebuild/repair) for recovering from a corrupted or missing vector index without a full data reset.
+- [ ] Structured application-level telemetry opt-in for crash/error reporting — explicitly out of scope until there is a documented, privacy-reviewed design (see `AGENTS.md` product invariants).
+
+---
 
 ## Verification commands
 

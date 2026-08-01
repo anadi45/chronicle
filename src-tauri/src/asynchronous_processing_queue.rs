@@ -4,6 +4,7 @@
 //! model must not block persistence of raw evidence. Workers will claim bounded
 //! batches, retry transient failures, and retain model/version metadata.
 
+use crate::capture_writer::{millis_since_last_input, ScreenshotCache};
 use crate::embedding_provider::TextEmbedder;
 use crate::local_model_provider::OllamaLocalModelProvider;
 use crate::local_sqlite_event_database::Database;
@@ -23,6 +24,15 @@ pub const MAX_RETRY_ATTEMPTS: u32 = 3;
 pub const MAX_PENDING_TASKS: u32 = 10_000;
 /// Keeps model memory and UI latency bounded while still amortizing HTTP/model overhead.
 pub const MAX_MODEL_BATCH_SIZE: usize = 8;
+/// Minimum pause after each processed batch. Local inference is CPU/GPU
+/// heavy; without a floor here a full queue would drive the worker loop
+/// back-to-back with zero yield, competing with the rest of the machine even
+/// though each individual batch is already bounded in size.
+const MIN_BATCH_PACING: Duration = Duration::from_millis(300);
+/// While the user has interacted (click or keypress) more recently than
+/// this, the worker steps aside instead of claiming new work, so local
+/// inference never competes with the user for CPU/GPU during active use.
+const RECENT_INPUT_BACKOFF_MS: i64 = 400;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ProcessingMetrics {
@@ -110,6 +120,7 @@ pub trait QueueTaskProcessor: Send + Sync {
 
 pub struct LocalModelQueueProcessor {
     pub database: Arc<Mutex<Database>>,
+    pub screenshot_cache: Arc<Mutex<ScreenshotCache>>,
 }
 fn persist_semantic_result(
     database: &Arc<Mutex<Database>>,
@@ -190,17 +201,31 @@ impl QueueTaskProcessor for LocalModelQueueProcessor {
                     .map_err(|e| e.to_string())
             }
             TaskType::SemanticImageAnalysis => {
-                let window_handle = event
-                    .window_handle
-                    .ok_or("image task has no window handle")?;
-                let image = crate::windows_graphics_capture_session::capture_one_frame_png(
-                    window_handle as isize,
-                )
-                .or_else(|_| {
-                    crate::windows_active_window_screenshot::capture_window_png(
-                        window_handle as isize,
-                    )
-                })?;
+                // Prefer the frame captured at event time (the window was
+                // guaranteed foregrounded then); only fall back to a live
+                // capture if that memory-only cache entry is gone, e.g. after
+                // an app restart or once the entry has already been consumed.
+                let cached = self
+                    .screenshot_cache
+                    .lock()
+                    .ok()
+                    .and_then(|mut cache| cache.take(&task.raw_event_id));
+                let image = match cached {
+                    Some(bytes) => bytes,
+                    None => {
+                        let window_handle = event
+                            .window_handle
+                            .ok_or("image task has no window handle")?;
+                        crate::windows_graphics_capture_session::capture_one_frame_png(
+                            window_handle as isize,
+                        )
+                        .or_else(|_| {
+                            crate::windows_active_window_screenshot::capture_window_png(
+                                window_handle as isize,
+                            )
+                        })?
+                    }
+                };
                 let output = provider.analyze_image(&image)?;
                 persist_semantic_result(&database, task, &provider, output)
             }
@@ -284,6 +309,14 @@ pub fn run_processing_worker(
             let _ = database.recover_stale_processing_tasks(10);
         }
         while !stop.load(Ordering::Relaxed) {
+            // Step aside while the user is actively clicking/typing so local
+            // inference never competes with them for CPU/GPU on the same
+            // machine; capture keeps running uninterrupted (it never goes
+            // through this worker), only new AI work waits.
+            if millis_since_last_input() < RECENT_INPUT_BACKOFF_MS {
+                thread::sleep(Duration::from_millis(RECENT_INPUT_BACKOFF_MS as u64));
+                continue;
+            }
             let task = database
                 .lock()
                 .ok()
@@ -333,6 +366,11 @@ pub fn run_processing_worker(
                     }
                 }
             }
+            // Bounded pacing: even with a full queue, never drive the model
+            // back-to-back at 100% — a short yield between batches keeps
+            // memory/CPU/GPU use predictable instead of spiking for as long
+            // as backlog exists.
+            thread::sleep(MIN_BATCH_PACING);
         }
         if let Ok(database) = database.lock() {
             let _ = database.requeue_processing_tasks();

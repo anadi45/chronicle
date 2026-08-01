@@ -15,12 +15,37 @@ Chronicle is a Windows-first, local-first computer memory engine. It persists ra
 - Processing Queue task/status contracts with exponential retry policy
 - Persistent capture settings in SQLite
 - JSON export command for local event data
+- `sqlite-vec` ANN vector similarity search for embeddings, with a durable binary/JSON brute-force fallback when the extension is unavailable or a query vector's dimensionality does not match the index
+- Separate `r2d2`/`r2d2_sqlite` read-only connection pool for UI query commands, kept apart from the single writer connection used by capture/processing so reads never block writes (or each other) on the database mutex
+- Async Tauri commands (`tauri::async_runtime::spawn_blocking`) for DB, model-status, and export work, so the UI thread is never blocked on rusqlite or Ollama HTTP calls
+- Event-driven filesystem watching via the `notify` crate (`ReadDirectoryChangesW` on Windows) instead of periodic recursive rescans
+- Event-driven foreground-window tracking via `SetWinEventHook` (`EVENT_SYSTEM_FOREGROUND`) instead of polling `GetForegroundWindow`
+- Recoverable database-init failure handling: a failed on-disk database open falls back to a transient in-memory database and is surfaced to the UI via `startup_diagnostics` instead of panicking the process
 
-The concrete Windows hooks, Processing Queue workers, screenshots, local model runtimes, embeddings, and installer hardening are implemented, with platform acceptance testing and optional sqlite-vec acceleration remaining. Settings persistence and export are available through the backend commands.
+The concrete Windows hooks, Processing Queue workers, screenshots, local model runtimes, embeddings, and installer hardening are implemented. Settings persistence and export are available through the backend commands.
 
 Local model discovery uses the Ollama-compatible API at `http://127.0.0.1:11434` by default. Set `CHRONICLE_OLLAMA_ENDPOINT`, `CHRONICLE_GEMMA_MODEL`, and `CHRONICLE_NOMIC_MODEL` to configure local models.
 Captured events enqueue local Gemma analysis followed by Nomic embedding generation. If Ollama or either model is unavailable, queue retries are used and capture continues.
-AI work is performed in bounded homogeneous batches of up to eight queue items. Gemma responses are index-checked, Nomic uses its multi-input embedding endpoint, and any unsupported or malformed batch falls back to individual requests without losing per-event retry/status tracking. Screenshot analysis remains single-image and memory-bounded.
+AI work is performed in bounded homogeneous batches of up to eight queue items, with a minimum pause between batches and a brief step-aside while the user is actively clicking or typing, so local inference never pegs the CPU/GPU or competes with active use. Only context-bearing events — window/app focus changes and filesystem activity — are ever queued for analysis; mouse and keyboard activity is recorded for Raw Evidence but never reaches the model. Gemma responses are index-checked, Nomic uses its multi-input embedding endpoint, and any unsupported or malformed batch falls back to individual requests without losing per-event retry/status tracking. Screenshot analysis remains single-image and memory-bounded: the frame is captured the moment a window gains focus (while it is guaranteed to still be on screen) and held in a small in-memory cache until the queue processes it, rather than re-captured later.
+
+## Performance
+
+- **Mouse capture is click/scroll only.** Movement is never recorded or analyzed — only discrete clicks, double-clicks, right-clicks, and scroll events reach capture, which is what keeps ordinary mouse use from flooding storage or the AI queue.
+- **Capture and AI processing are decoupled.** Every capture source (mouse/keyboard hooks, foreground `SetWinEventHook`, filesystem watching) sends normalized events to one writer thread (`capture_writer`) over a channel; none of them touch SQLite directly, so a slow database write or a busy AI worker can never stall the low-level input hooks (which, if blocked, would visibly lag the whole system, not just Chronicle).
+- **The database uses WAL with `synchronous=NORMAL`** and indexes on the hot lookup paths (recent events, per-event semantic/queue status), plus a `busy_timeout` so concurrent readers/writers wait briefly instead of erroring.
+- **The local model client reuses keep-alive connections** (via `ureq`) instead of opening a new TCP connection per inference call, and correctly handles HTTP status codes and chunked responses.
+
+## Architecture
+
+The capture path is intentionally independent from the AI path:
+
+```text
+Windows provider -> normalized raw event -> capture_writer -> SQLite -> Processing Queue -> semantic event/search index
+```
+
+Raw events are append-only evidence, persisted before any AI processing runs. Semantic events reference their source raw event and can be regenerated when models change; deleting or reprocessing semantic data never touches the raw record it was derived from.
+
+Every capture source (mouse/keyboard hooks, `SetWinEventHook` foreground tracking, `notify`-based filesystem watching) sends normalized events to the single `capture_writer` thread over a channel rather than touching SQLite directly, so a slow database write or a busy AI worker can never stall a low-level input hook. Reads (Timeline, Search, Diagnostics) go through a separate `r2d2` read-only connection pool so UI queries never contend with capture writes.
 
 ## Local model setup
 
@@ -59,7 +84,7 @@ Window-handle events use Windows Graphics Capture with D3D11 texture readback fo
 ## Development milestones
 
 1. Raw event persistence and UI — implemented
-2. Windows foreground/window capture — provider contract ready; native hook next
+2. Windows foreground/window capture — event-driven via `SetWinEventHook`
 3. Keyboard, mouse, UI Automation, and filesystem providers
 4. Screenshot lifecycle and Processing Queue
 5. Gemma analysis, Nomic embeddings, and hybrid search
