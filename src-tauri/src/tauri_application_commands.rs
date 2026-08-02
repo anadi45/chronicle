@@ -8,7 +8,7 @@ use crate::activity_capture::CaptureSettings;
 use crate::asynchronous_processing_queue::{
     run_processing_worker, LocalModelQueueProcessor, MAX_PENDING_TASKS, MAX_RETRY_ATTEMPTS,
 };
-use crate::local_model_provider::{LocalModelStatus, OllamaLocalModelProvider};
+use crate::local_model_provider::{LlamaCppProvider, LocalModelStatus};
 use crate::local_sqlite_event_database::{
     self, count_events_on, embedding_exists_on, processing_status_for_raw_event_on,
     queue_counts_on, recent_events_on, recent_semantic_events_on, semantic_for_raw_event_on,
@@ -33,7 +33,10 @@ pub struct AppState {
     pub settings: Arc<Mutex<CaptureSettings>>,
     pub capture_stop: Mutex<Option<Arc<AtomicBool>>>,
     pub capture_threads: Mutex<Vec<JoinHandle<()>>>,
-    pub ollama_process: Mutex<Option<Child>>,
+    /// The chat/vision `llama-server` process, if Chronicle started it.
+    pub llama_chat_process: Mutex<Option<Child>>,
+    /// The embedding `llama-server` process, if Chronicle started it.
+    pub llama_embed_process: Mutex<Option<Child>>,
     /// Set when database initialization failed and a degraded in-memory
     /// database is being used instead. Surfaced to the UI so a failed disk
     /// database is a visible, recoverable error state rather than a crash.
@@ -113,10 +116,18 @@ impl AppState {
             .flatten()
             .and_then(|json| serde_json::from_str(&json).ok())
             .unwrap_or_default();
-        let ollama_process = match OllamaLocalModelProvider::default().start_server_if_needed() {
+        let engine = LlamaCppProvider::default();
+        let llama_chat_process = match engine.start_chat_server_if_needed() {
             Ok(process) => process,
             Err(error) => {
-                tracing::warn!(%error, "Ollama was not started; local AI will retry through the queue");
+                tracing::warn!(%error, "chat/vision engine was not started; local AI will retry through the queue");
+                None
+            }
+        };
+        let llama_embed_process = match engine.start_embed_server_if_needed() {
+            Ok(process) => process,
+            Err(error) => {
+                tracing::warn!(%error, "embedding engine was not started; local AI will retry through the queue");
                 None
             }
         };
@@ -140,7 +151,8 @@ impl AppState {
             settings: Arc::new(Mutex::new(settings)),
             capture_stop: Mutex::new(None),
             capture_threads: Mutex::new(Vec::new()),
-            ollama_process: Mutex::new(ollama_process),
+            llama_chat_process: Mutex::new(llama_chat_process),
+            llama_embed_process: Mutex::new(llama_embed_process),
             startup_error,
             screenshot_cache: Arc::new(Mutex::new(crate::capture_writer::ScreenshotCache::new(32))),
         }
@@ -675,19 +687,19 @@ pub struct ModelProviderStatus {
 }
 
 fn model_provider_status_blocking() -> ModelProviderStatus {
-    let provider = OllamaLocalModelProvider::default();
+    let provider = LlamaCppProvider::default();
     let local_models = provider.status();
     ModelProviderStatus {
-        semantic_provider: format!("Ollama/Gemma ({})", local_models.gemma_model),
-        embedding_provider: format!("Ollama/Nomic ({})", local_models.nomic_model),
-        semantic_available: local_models.gemma_available,
-        embedding_available: local_models.nomic_available,
+        semantic_provider: format!("llama.cpp/Gemma ({})", local_models.chat_model),
+        embedding_provider: format!("llama.cpp/EmbeddingGemma ({})", local_models.embedding_model),
+        semantic_available: local_models.chat_available,
+        embedding_available: local_models.embedding_available,
         local_models,
     }
 }
 
 /// Queries local model availability, which involves a blocking HTTP call to
-/// the Ollama server. Runs off the UI thread via `spawn_blocking`.
+/// the local llama.cpp engine. Runs off the UI thread via `spawn_blocking`.
 #[tauri::command]
 pub async fn model_provider_status() -> Result<ModelProviderStatus, String> {
     tauri::async_runtime::spawn_blocking(model_provider_status_blocking)
@@ -800,11 +812,13 @@ pub fn stop_capture_state(state: &AppState) {
     }
 }
 
-pub fn shutdown_ollama(state: &AppState) {
-    if let Ok(mut ollama_slot) = state.ollama_process.lock() {
-        if let Some(mut process) = ollama_slot.take() {
-            let _ = process.kill();
-            let _ = process.wait();
+pub fn shutdown_llama_engine(state: &AppState) {
+    for slot in [&state.llama_chat_process, &state.llama_embed_process] {
+        if let Ok(mut process_slot) = slot.lock() {
+            if let Some(mut process) = process_slot.take() {
+                let _ = process.kill();
+                let _ = process.wait();
+            }
         }
     }
 }

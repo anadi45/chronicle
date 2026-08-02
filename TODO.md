@@ -23,7 +23,7 @@ Legend: `[x]` complete · `[~]` in progress · `[ ]` pending
 
 - [x] `sqlite-vec` ANN vector similarity search, with a durable binary/JSON brute-force fallback when the extension is unavailable or a query vector's dimensionality doesn't match the index
 - [x] `r2d2`/`r2d2_sqlite` read-only connection pool, separate from the single writer connection, so UI reads never contend with capture writes
-- [x] Async Tauri commands (`spawn_blocking`) for DB, model-status, and export work — the UI thread is never blocked on rusqlite or Ollama HTTP calls
+- [x] Async Tauri commands (`spawn_blocking`) for DB, model-status, and export work — the UI thread is never blocked on rusqlite or local-engine HTTP calls
 - [x] Recoverable database-init failure handling: a failed on-disk database open falls back to a transient in-memory database and is surfaced to the UI via `startup_diagnostics`, instead of panicking the process
 - [x] WAL journal mode, `synchronous=NORMAL`, `busy_timeout`, and indexes on hot lookup paths (recent events, per-event semantic/queue status)
 - [x] All capture sources write through one batching writer thread (`capture_writer`) instead of touching SQLite directly
@@ -69,15 +69,26 @@ Legend: `[x]` complete · `[~]` in progress · `[ ]` pending
 - [x] Queue insert/claim/complete/fail repository methods; bounded worker loop; retry limit and stop handling
 - [x] Crash recovery for `processing` tasks; requeue on graceful shutdown; retry count/timestamp persistence
 - [x] Cancellation and bounded backpressure for pending tasks
-- [x] Gemma provider configuration and Ollama model discovery; Nomic Embed Text adapter
+- [x] Gemma 3 (chat + vision) and EmbeddingGemma served locally by a bundled llama.cpp engine (`llama-server`), not a separately installed application — see section 8
 - [x] Structured text/image analysis validation boundaries; model JSON output validated before persistence
-- [x] Bounded homogeneous batching (up to 8 items) with per-event retry/status tracking preserved across batch fallback
+- [x] Bounded homogeneous batching (up to 8 items) for text analysis, with per-event retry/status tracking preserved across batch fallback; embedding generation batches natively via `/v1/embeddings`' array input
 - [x] AI worker paces itself between batches and steps aside while the user is actively clicking/typing
-- [x] Ollama client uses a keep-alive `ureq` agent with status-code checks and correct chunked-response handling
+- [x] Local engine client uses a keep-alive `ureq` agent with status-code checks and correct chunked-response handling
 - [x] Hybrid FTS5/vector ranking; durable binary embedding fallback with JSON compatibility
 - [x] Processing metrics (latency, error counters, snapshot/reset)
 
-## 8. UI and diagnostics
+## 8. Local AI engine (llama.cpp) and its in-app setup
+
+- [x] Bundled `llama-server` runtime — no separate installer, tray icon, or Start Menu entry; downloaded from llama.cpp's own GitHub releases (CPU-only Windows build, queried at setup time so it's always the current release) and run as a plain Chronicle-managed child process
+- [x] Two local servers on `127.0.0.1`: chat/vision (Gemma 3 4B + multimodal projector) and embeddings (EmbeddingGemma), both OpenAI-compatible (`/v1/chat/completions`, `/v1/embeddings`)
+- [x] In-app one-time setup: Settings shows an engine-downloaded / analysis-model / embedding-model / engine-running checklist, each step independently downloadable and removable, with real byte-accurate progress (from each response's `Content-Length`, not estimated) streamed to the UI and mirrored to `tracing`
+- [x] Removing a downloaded artifact stops the server using it first (a running process keeps its executable/model files locked on Windows)
+- [x] Vision analysis via the OpenAI-compatible `image_url` (base64 data URI) content part, gated on the server being started with `--mmproj`
+- [ ] **Not yet live-tested end-to-end.** URLs, CLI flags, and request/response shapes were verified against llama.cpp's current documentation and GitHub releases, but the actual multi-gigabyte downloads, extraction, and inference — especially the vision path, which llama.cpp's own docs describe as experimental — have not been exercised in this environment. Run the full setup checklist once on a real Windows machine and fix whatever doesn't match.
+- [ ] GPU acceleration (CUDA/Vulkan builds) is not automatic — the engine always downloads the CPU-only build regardless of hardware. Detecting a usable GPU and offering the matching build is unstarted.
+- [ ] No model-swap/version-upgrade path yet — replacing a model means removing it and downloading a (possibly future, differently-named) replacement by hand; there's no "update available" signal.
+
+## 9. UI and diagnostics
 
 - [x] Semantic-event FTS search; Timeline/Search show only processed insights, never raw capture
 - [x] Separate Raw Evidence page; event inspector with raw JSON and source evidence
@@ -86,7 +97,7 @@ Legend: `[x]` complete · `[~]` in progress · `[ ]` pending
 - [x] Export-to-JSON and delete-all wired to the UI with confirmation
 - [x] Storage usage, model/provider status, and processing queue limits commands
 
-## 9. Hardening and release
+## 10. Hardening and release
 
 - [x] Bounded FTS search baseline at 1,000 events; raw persistence and queue latency baselines
 - [x] Reproducible Windows release smoke-test workflow; Windows installer icon/resources
@@ -111,6 +122,8 @@ Tracked defects that are understood but not yet fixed. Verify current behavior b
 - [ ] **JSON export is raw-events-only.** `export_json` exports raw events (capped at 100k) but not semantic events, embeddings, or settings, while the UI presents "Export JSON" as a full local data export.
 - [ ] **`record_event` trusts its caller.** Any webview-side code can insert arbitrary raw events and enqueue AI work through this command; acceptable within the current single-user local-trust model, but worth revisiting if a plugin/extension surface is ever added.
 - [ ] **Mixed processing-queue batches only advance the first task when an image task is present**, leaving the rest in `processing` until the stale-task recovery sweep picks them up.
+- [ ] **The llama.cpp release-asset lookup assumes a stable naming pattern** (`*bin-win-cpu-x64*.zip`). If upstream ever renames or restructures Windows release assets, `setup_download_runtime` will fail with a clear "no Windows CPU build found" error rather than silently downloading the wrong thing — but it will need a code update to match the new pattern.
+- [ ] **No checksum/signature verification on downloaded artifacts.** Downloads go straight from GitHub/Hugging Face over HTTPS with no separate integrity check; acceptable given both are the canonical official sources, but worth revisiting if a mirror or proxy is ever introduced.
 
 ## Future scope
 

@@ -8,6 +8,7 @@ mod embedding_provider;
 mod filesystem_activity_capture;
 #[allow(dead_code)]
 mod input_capture;
+mod local_ai_setup;
 mod local_model_provider;
 #[allow(dead_code)]
 mod local_semantic_processing;
@@ -81,13 +82,21 @@ pub fn run() {
             tauri_application_commands::cancel_pending_processing_tasks,
             tauri_application_commands::retry_failed_processing_tasks,
             tauri_application_commands::processing_status_for_event,
-            tauri_application_commands::startup_diagnostics
+            tauri_application_commands::startup_diagnostics,
+            local_ai_setup::local_ai_setup_status,
+            local_ai_setup::setup_download_runtime,
+            local_ai_setup::setup_download_chat_model,
+            local_ai_setup::setup_download_embed_model,
+            local_ai_setup::setup_start_engine,
+            local_ai_setup::setup_remove_runtime,
+            local_ai_setup::setup_remove_chat_model,
+            local_ai_setup::setup_remove_embed_model
         ])
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
                 let state = window.app_handle().state::<AppState>();
                 tauri_application_commands::stop_capture_state(&state);
-                tauri_application_commands::shutdown_ollama(&state);
+                tauri_application_commands::shutdown_llama_engine(&state);
             }
         })
         .run(tauri::generate_context!())

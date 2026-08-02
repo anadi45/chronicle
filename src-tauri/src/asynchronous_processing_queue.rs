@@ -6,7 +6,7 @@
 
 use crate::capture_writer::{millis_since_last_input, ScreenshotCache};
 use crate::embedding_provider::TextEmbedder;
-use crate::local_model_provider::OllamaLocalModelProvider;
+use crate::local_model_provider::LlamaCppProvider;
 use crate::local_sqlite_event_database::Database;
 use crate::local_sqlite_event_database::SemanticEvent;
 use chrono::Utc;
@@ -125,7 +125,7 @@ pub struct LocalModelQueueProcessor {
 fn persist_semantic_result(
     database: &Arc<Mutex<Database>>,
     task: &QueueTask,
-    provider: &OllamaLocalModelProvider,
+    provider: &LlamaCppProvider,
     output: crate::local_semantic_processing::SemanticModelOutput,
 ) -> Result<(), String> {
     if database
@@ -148,8 +148,8 @@ fn persist_semantic_result(
             entities_json: serde_json::to_string(&output.entities).unwrap_or_default(),
             relationships_json: serde_json::to_string(&output.relationships).unwrap_or_default(),
             confidence: output.confidence,
-            model_name: provider.gemma_model.clone(),
-            model_version: "ollama".into(),
+            model_name: provider.chat_model.clone(),
+            model_version: "llama.cpp".into(),
             created_at: Utc::now().to_rfc3339(),
         })
         .map_err(|e| e.to_string())?;
@@ -168,7 +168,7 @@ fn persist_semantic_result(
 }
 impl QueueTaskProcessor for LocalModelQueueProcessor {
     fn process(&self, task: &QueueTask) -> Result<(), String> {
-        let provider = OllamaLocalModelProvider::default();
+        let provider = LlamaCppProvider::default();
         let database = self.database.clone();
         let event = database
             .lock()
@@ -197,7 +197,7 @@ impl QueueTaskProcessor for LocalModelQueueProcessor {
                 database
                     .lock()
                     .map_err(|_| "database lock poisoned")?
-                    .insert_embedding(&semantic_id, &provider.nomic_model, "ollama", &embedding)
+                    .insert_embedding(&semantic_id, &provider.embedding_model, "llama.cpp", &embedding)
                     .map_err(|e| e.to_string())
             }
             TaskType::SemanticImageAnalysis => {
@@ -240,7 +240,7 @@ impl QueueTaskProcessor for LocalModelQueueProcessor {
         {
             return self.process(tasks.first().ok_or("empty processing batch")?);
         }
-        let provider = OllamaLocalModelProvider::default();
+        let provider = LlamaCppProvider::default();
         let database = self.database.clone();
         let contexts = tasks
             .iter()
@@ -289,7 +289,7 @@ impl QueueTaskProcessor for LocalModelQueueProcessor {
                     database
                         .lock()
                         .map_err(|_| "database lock poisoned")?
-                        .insert_embedding(&semantic_id, &provider.nomic_model, "ollama", &embedding)
+                        .insert_embedding(&semantic_id, &provider.embedding_model, "llama.cpp", &embedding)
                         .map_err(|e| e.to_string())?;
                 }
             }
