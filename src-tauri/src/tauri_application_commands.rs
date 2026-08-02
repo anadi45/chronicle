@@ -567,6 +567,7 @@ pub fn start_capture_state(state: &AppState) -> Result<(), String> {
         state.database.clone(),
         stop.clone(),
         state.settings.clone(),
+        state.screenshot_cache.clone(),
     );
     *stop_slot = Some(stop.clone());
     let mut threads = state

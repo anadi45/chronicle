@@ -194,9 +194,10 @@ pub fn start_foreground_loop(
     database: Arc<std::sync::Mutex<crate::local_sqlite_event_database::Database>>,
     stop: Arc<AtomicBool>,
     settings: Arc<std::sync::Mutex<CaptureSettings>>,
+    screenshot_cache: Arc<std::sync::Mutex<crate::capture_writer::ScreenshotCache>>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
-        windows::run_foreground_hook_loop(database, stop, settings);
+        windows::run_foreground_hook_loop(database, stop, settings, screenshot_cache);
     })
 }
 
@@ -205,6 +206,7 @@ pub fn start_foreground_loop(
     _database: Arc<std::sync::Mutex<crate::local_sqlite_event_database::Database>>,
     stop: Arc<AtomicBool>,
     _settings: Arc<std::sync::Mutex<CaptureSettings>>,
+    _screenshot_cache: Arc<std::sync::Mutex<crate::capture_writer::ScreenshotCache>>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         while !stop.load(Ordering::Relaxed) {

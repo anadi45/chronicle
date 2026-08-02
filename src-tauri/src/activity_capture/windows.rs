@@ -24,6 +24,7 @@ pub const PROVIDER_NAME: &str = "windows_foreground_activity";
 struct HookContext {
     database: Arc<Mutex<Database>>,
     settings: Arc<Mutex<CaptureSettings>>,
+    screenshot_cache: Arc<Mutex<crate::capture_writer::ScreenshotCache>>,
     previous: Option<(isize, String)>,
 }
 
@@ -43,6 +44,7 @@ pub fn run_foreground_hook_loop(
     database: Arc<Mutex<Database>>,
     stop: Arc<AtomicBool>,
     settings: Arc<Mutex<CaptureSettings>>,
+    screenshot_cache: Arc<Mutex<crate::capture_writer::ScreenshotCache>>,
 ) {
     use ::windows::Win32::Foundation::HWND;
     use ::windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent};
@@ -55,6 +57,7 @@ pub fn run_foreground_hook_loop(
         *context.borrow_mut() = Some(HookContext {
             database,
             settings,
+            screenshot_cache,
             previous: None,
         });
     });
@@ -169,6 +172,31 @@ fn process_foreground_change() {
         event.window_handle = Some(handle as u64);
         event.event_type = event_type.into();
         event.metadata_json = format!("{{\"window_handle\":{handle}}}");
+        // A window-handle event with screenshots enabled is enqueued for
+        // image analysis (see `insert_event_and_enqueue`), so the frame is
+        // captured here — while the window is guaranteed to still be
+        // foregrounded — and handed to the queue worker via the shared
+        // cache, rather than the worker re-capturing later when the window
+        // may have moved, minimized, or closed.
+        let screenshots_enabled = context
+            .settings
+            .lock()
+            .map(|settings| settings.screenshots_enabled)
+            .unwrap_or(false);
+        if screenshots_enabled {
+            let captured = crate::windows_graphics_capture_session::capture_one_frame_png(handle)
+                .or_else(|_| crate::windows_active_window_screenshot::capture_window_png(handle));
+            match captured {
+                Ok(bytes) => {
+                    if let Ok(mut cache) = context.screenshot_cache.lock() {
+                        cache.insert(event.id.clone(), bytes);
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(%error, event_id = %event.id, "failed to capture screenshot for foreground event");
+                }
+            }
+        }
         match context.database.lock() {
             Ok(database) => {
                 if let Err(error) = database.insert_event_and_enqueue(&event) {
