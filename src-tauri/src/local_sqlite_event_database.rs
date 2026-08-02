@@ -90,9 +90,12 @@ pub type ReaderPool = r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>;
 /// writer uses. Each pooled connection is set `query_only` so it structurally
 /// cannot perform writes even if a caller passes it into a write path.
 pub fn open_reader_pool() -> std::result::Result<ReaderPool, r2d2::Error> {
+    // Must happen before any pooled connection is opened: `with_init` runs
+    // its callback on an already-open handle, which is too late for
+    // `sqlite3_auto_extension` to take effect on that connection.
+    register_sqlite_vec_extension();
     let manager = r2d2_sqlite::SqliteConnectionManager::file("chronicle.db").with_init(
         |connection| {
-            register_sqlite_vec_extension();
             connection.pragma_update(None, "query_only", "ON")?;
             connection.pragma_update(None, "journal_mode", "WAL")?;
             Ok(())
@@ -107,11 +110,14 @@ pub struct Database {
 
 impl Database {
     pub fn open() -> Result<Self> {
+        // `sqlite3_auto_extension` only affects connections opened after
+        // registration, so this must run before `Connection::open` — not
+        // inside `from_connection`, which receives an already-open handle.
+        register_sqlite_vec_extension();
         Self::from_connection(Connection::open("chronicle.db")?)
     }
 
     fn from_connection(connection: Connection) -> Result<Self> {
-        register_sqlite_vec_extension();
         connection.pragma_update(None, "journal_mode", "WAL")?;
         connection.pragma_update(None, "foreign_keys", "ON")?;
         connection.execute_batch(include_str!("../migrations/001_initial.sql"))?;
@@ -163,6 +169,7 @@ impl Database {
 
     #[cfg(test)]
     pub(crate) fn in_memory() -> Result<Self> {
+        register_sqlite_vec_extension();
         Self::from_connection(Connection::open_in_memory()?)
     }
 
@@ -171,6 +178,7 @@ impl Database {
     /// failure degrades capture (no persistence across restarts) instead of
     /// crashing the whole application.
     pub fn open_in_memory_degraded() -> Result<Self> {
+        register_sqlite_vec_extension();
         Self::from_connection(Connection::open_in_memory()?)
     }
 
