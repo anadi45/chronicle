@@ -54,7 +54,7 @@ Chronicle does not depend on a separately installed AI application. There's no S
 The **Settings** page shows a "Local AI setup" checklist — inference engine downloaded → analysis model → embedding model → engine running — with a button for each unmet step:
 
 1. **Inference engine**: downloads the latest Windows CPU build of `llama-server` from [llama.cpp's GitHub releases](https://github.com/ggml-org/llama.cpp/releases) (queried at setup time, so it always fetches the current release rather than one pinned into Chronicle's code) and extracts it.
-2. **Analysis model**: downloads Google's official [`gemma-3-4b-it-qat-q4_0-gguf`](https://huggingface.co/google/gemma-3-4b-it-qat-q4_0-gguf) (chat + vision, ~3.2 GB) plus its multimodal projector (~850 MB).
+2. **Analysis model**: downloads Gemma 3 4B Instruct (chat + vision, Q4_K_M, ~2.5 GB) plus its multimodal projector (~850 MB), from [`bartowski/google_gemma-3-4b-it-GGUF`](https://huggingface.co/bartowski/google_gemma-3-4b-it-GGUF) — a community re-upload of Google's weights. Google's own [`gemma-3-4b-it-qat-q4_0-gguf`](https://huggingface.co/google/gemma-3-4b-it-qat-q4_0-gguf) repo is access-gated (requires a Hugging Face login and accepting a license agreement, returning HTTP 401 for an anonymous download), so this setup flow uses the openly downloadable mirror instead.
 3. **Embedding model**: downloads [`EmbeddingGemma`](https://huggingface.co/ggml-org/embeddinggemma-300M-GGUF) (~330 MB) — a small Gemma-family embedding model, so both the analysis and embedding paths are Gemma models rather than mixing model families.
 4. **Engine running**: starts two `llama-server` processes on `127.0.0.1` (chat/vision on `8090`, embeddings on `8091` by default).
 

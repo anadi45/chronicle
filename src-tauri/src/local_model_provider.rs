@@ -28,14 +28,22 @@ pub mod engine_paths {
     use std::path::PathBuf;
 
     /// Display name for the chat/vision model file — also its filename.
-    pub const CHAT_MODEL_FILE: &str = "gemma-3-4b-it-q4_0.gguf";
+    ///
+    /// Sourced from `bartowski`'s GGUF re-upload rather than Google's
+    /// official `google/gemma-3-4b-it-qat-q4_0-gguf` repo: Google's repo is
+    /// access-gated (requires a Hugging Face login and accepting a license
+    /// agreement), which returns HTTP 401 for the anonymous download this
+    /// setup flow does. `bartowski`'s re-upload of the same weights is
+    /// openly downloadable and is the community-standard mirror llama.cpp
+    /// users are pointed to for exactly this reason.
+    pub const CHAT_MODEL_FILE: &str = "google_gemma-3-4b-it-Q4_K_M.gguf";
     /// Multimodal projector required alongside the chat model for vision input.
-    pub const MMPROJ_FILE: &str = "mmproj-model-f16-4B.gguf";
+    pub const MMPROJ_FILE: &str = "mmproj-google_gemma-3-4b-it-f16.gguf";
     /// Display name for the embedding model file — also its filename.
     pub const EMBED_MODEL_FILE: &str = "embeddinggemma-300M-Q8_0.gguf";
 
-    pub const CHAT_MODEL_URL: &str = "https://huggingface.co/google/gemma-3-4b-it-qat-q4_0-gguf/resolve/main/gemma-3-4b-it-q4_0.gguf";
-    pub const MMPROJ_URL: &str = "https://huggingface.co/google/gemma-3-4b-it-qat-q4_0-gguf/resolve/main/mmproj-model-f16-4B.gguf";
+    pub const CHAT_MODEL_URL: &str = "https://huggingface.co/bartowski/google_gemma-3-4b-it-GGUF/resolve/main/google_gemma-3-4b-it-Q4_K_M.gguf";
+    pub const MMPROJ_URL: &str = "https://huggingface.co/bartowski/google_gemma-3-4b-it-GGUF/resolve/main/mmproj-google_gemma-3-4b-it-f16.gguf";
     pub const EMBED_MODEL_URL: &str = "https://huggingface.co/ggml-org/embeddinggemma-300M-GGUF/resolve/main/embeddinggemma-300M-Q8_0.gguf";
 
     fn base_dir() -> PathBuf {
