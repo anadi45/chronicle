@@ -47,8 +47,10 @@ pub mod engine_paths {
     pub const MMPROJ_URL: &str = "https://huggingface.co/bartowski/google_gemma-3-4b-it-GGUF/resolve/main/mmproj-google_gemma-3-4b-it-f16.gguf";
     pub const EMBED_MODEL_URL: &str = "https://huggingface.co/ggml-org/embeddinggemma-300M-GGUF/resolve/main/embeddinggemma-300M-Q8_0.gguf";
 
-    fn base_dir() -> PathBuf {
-        crate::data_directory::data_dir().join("llama")
+    /// `None` until the user has chosen a data directory from Settings —
+    /// there is nowhere to put model files yet.
+    fn base_dir() -> Option<PathBuf> {
+        Some(crate::data_directory::current()?.join("llama"))
     }
 
     /// Where the `llama-server` binary and its DLLs live. Unlike the model
@@ -73,29 +75,29 @@ pub mod engine_paths {
             .join("resources")
             .join("llama")
     }
-    pub fn models_dir() -> PathBuf {
-        base_dir().join("models")
+    pub fn models_dir() -> Option<PathBuf> {
+        Some(base_dir()?.join("models"))
     }
     pub fn server_binary() -> PathBuf {
         runtime_dir().join("llama-server.exe")
     }
-    pub fn chat_model() -> PathBuf {
-        models_dir().join(CHAT_MODEL_FILE)
+    pub fn chat_model() -> Option<PathBuf> {
+        Some(models_dir()?.join(CHAT_MODEL_FILE))
     }
-    pub fn mmproj() -> PathBuf {
-        models_dir().join(MMPROJ_FILE)
+    pub fn mmproj() -> Option<PathBuf> {
+        Some(models_dir()?.join(MMPROJ_FILE))
     }
-    pub fn embed_model() -> PathBuf {
-        models_dir().join(EMBED_MODEL_FILE)
+    pub fn embed_model() -> Option<PathBuf> {
+        Some(models_dir()?.join(EMBED_MODEL_FILE))
     }
     pub fn runtime_installed() -> bool {
         server_binary().is_file()
     }
     pub fn chat_model_installed() -> bool {
-        chat_model().is_file() && mmproj().is_file()
+        chat_model().is_some_and(|path| path.is_file()) && mmproj().is_some_and(|path| path.is_file())
     }
     pub fn embed_model_installed() -> bool {
-        embed_model().is_file()
+        embed_model().is_some_and(|path| path.is_file())
     }
 }
 
@@ -222,11 +224,15 @@ impl LlamaCppProvider {
         if !engine_paths::runtime_installed() || !engine_paths::chat_model_installed() {
             return Ok(None);
         }
+        let (Some(chat_model), Some(mmproj)) = (engine_paths::chat_model(), engine_paths::mmproj())
+        else {
+            return Ok(None);
+        };
         Command::new(engine_paths::server_binary())
             .arg("-m")
-            .arg(engine_paths::chat_model())
+            .arg(chat_model)
             .arg("--mmproj")
-            .arg(engine_paths::mmproj())
+            .arg(mmproj)
             .arg("--host")
             .arg(&self.host)
             .arg("--port")
@@ -248,9 +254,12 @@ impl LlamaCppProvider {
         if !engine_paths::runtime_installed() || !engine_paths::embed_model_installed() {
             return Ok(None);
         }
+        let Some(embed_model) = engine_paths::embed_model() else {
+            return Ok(None);
+        };
         Command::new(engine_paths::server_binary())
             .arg("-m")
-            .arg(engine_paths::embed_model())
+            .arg(embed_model)
             .arg("--host")
             .arg(&self.host)
             .arg("--port")

@@ -1,13 +1,14 @@
-//! Where Chronicle stores its data — chosen explicitly by the user.
+//! Where Chronicle stores its data — chosen explicitly by the user, from
+//! Settings, not forced on app start.
 //!
 //! Everything Chronicle writes to disk (the sqlite event database, the
-//! downloaded llama.cpp model files) lives under this one directory instead
-//! of being scattered into the install folder or a fixed path the user never
-//! agreed to. There is deliberately no default: if no directory has been
-//! chosen yet (no pointer file, or the previously chosen folder no longer
-//! exists), Chronicle blocks startup on a folder-choose dialog and asks
-//! again on cancel rather than silently picking one for the user. The
-//! choice itself is remembered in a small pointer file whose OS location is
+//! downloaded llama.cpp model files) lives under one directory instead of
+//! being scattered into the install folder or a fixed path the user never
+//! agreed to. There is deliberately no default: until the user picks one
+//! (via the Settings panel, when they set up local AI), `current()` simply
+//! returns `None` and Chronicle runs in a temporary, non-persistent mode —
+//! it does not block startup on a folder-choose dialog. The choice, once
+//! made, is remembered in a small pointer file whose OS location is
 //! platform-specific (see `windows.rs`, `mac.rs`).
 //!
 //! Whatever folder the user picks, Chronicle never writes directly into it:
@@ -28,7 +29,7 @@ use windows as platform;
 use mac as platform;
 
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 const CHRONICLE_SUBFOLDER: &str = "chronicle";
 
@@ -50,63 +51,35 @@ fn write_pointer(root: &Path) -> std::io::Result<()> {
     std::fs::write(pointer, root.to_string_lossy().as_bytes())
 }
 
-/// Blocks on a native folder-choose dialog until the user picks a directory
-/// Chronicle can actually create/use. Cancelling asks again — there is no
-/// fallback default, since a silently-chosen location is exactly what the
-/// user directory exists to avoid.
-fn ask_user_to_choose() -> PathBuf {
-    loop {
-        let Some(chosen) = rfd::FileDialog::new()
-            .set_title("Chronicle needs a folder to store its data and downloaded models — choose one to continue")
-            .pick_folder()
-        else {
-            tracing::warn!("no data directory chosen; Chronicle cannot start without one — asking again");
-            continue;
-        };
-        if std::fs::create_dir_all(chronicle_subfolder(&chosen)).is_ok() {
-            return chosen;
-        }
-        tracing::error!(path = %chosen.display(), "failed to create the chosen data directory; choose another");
-    }
-}
-
 fn chronicle_subfolder(root: &Path) -> PathBuf {
     root.join(CHRONICLE_SUBFOLDER)
 }
 
-fn resolve_data_dir() -> PathBuf {
-    let root = if let Some(existing_root) = read_pointer() {
-        if chronicle_subfolder(&existing_root).is_dir() {
-            existing_root
-        } else {
-            tracing::warn!(path = %existing_root.display(), "previously chosen data directory no longer exists; asking again");
-            let chosen = ask_user_to_choose();
-            if let Err(error) = write_pointer(&chosen) {
-                tracing::error!(%error, "failed to remember the chosen data directory; Chronicle will ask again next launch");
-            }
-            chosen
-        }
-    } else {
-        let chosen = ask_user_to_choose();
-        if let Err(error) = write_pointer(&chosen) {
-            tracing::error!(%error, "failed to remember the chosen data directory; Chronicle will ask again next launch");
-        }
-        chosen
-    };
-    chronicle_subfolder(&root)
+fn cell() -> &'static Mutex<Option<PathBuf>> {
+    static CELL: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
+    CELL.get_or_init(|| {
+        let configured = read_pointer()
+            .filter(|root| chronicle_subfolder(root).is_dir())
+            .map(|root| chronicle_subfolder(&root));
+        Mutex::new(configured)
+    })
 }
 
-/// The `chronicle` subfolder under the user-chosen root directory — every
-/// file Chronicle stores lives under here. Resolved once per process
-/// (asking the user if necessary) and cached.
-pub fn data_dir() -> &'static Path {
-    static DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
-    DATA_DIR.get_or_init(resolve_data_dir)
+/// The `chronicle` subfolder under the user-chosen root directory, if the
+/// user has chosen one yet. `None` means Chronicle is running in a
+/// temporary, non-persistent mode until Settings is used to pick a folder —
+/// this never blocks or prompts on its own.
+pub fn current() -> Option<PathBuf> {
+    cell().lock().unwrap().clone()
 }
 
-/// Path to the sqlite event database, under the chosen data directory.
+/// Path to the sqlite event database, under the chosen data directory. Only
+/// call once `current()` is known to be `Some` — every caller in this
+/// codebase is gated on that (see `AppState::initialize`).
 pub fn database_file() -> PathBuf {
-    data_dir().join("chronicle.db")
+    current()
+        .expect("database_file() called before a data directory was chosen")
+        .join("chronicle.db")
 }
 
 fn format_bytes(bytes: u64) -> String {
@@ -166,26 +139,34 @@ fn copy_dir_recursive(
     Ok(())
 }
 
-/// Moves Chronicle's data from the current data directory into a
-/// `chronicle` subfolder under `new_root` (the user-picked destination —
-/// same "must be a real, explicitly chosen path, no default" rule as
-/// first-run resolution) and remembers `new_root` as the new choice.
+/// Sets or moves the data directory to `new_root` (a user-picked
+/// destination — same "must be a real, explicitly chosen path, no default"
+/// rule as `choose_new`), copying over whatever is already there if a data
+/// directory was already configured.
 ///
-/// Checks free space at the destination before copying a single byte, so a
-/// too-small target fails fast with a clear message instead of partway
-/// through a multi-gigabyte copy. Copies rather than renames (a rename
-/// fails outright across drives, which is a completely ordinary choice
-/// here — e.g. moving from `C:` to a `D:` data disk) and only removes the
-/// old copy after every file has landed safely in the new location. The
-/// caller is responsible for having stopped anything that holds these files
-/// open (capture threads, the llama.cpp servers, the database connection)
-/// before calling this — copying files still being written by a live
-/// connection would race.
-pub fn relocate(new_root: &Path, mut on_progress: impl FnMut(u64, u64)) -> Result<(), String> {
+/// When nothing was configured yet, this is exactly `choose_new` (no data to
+/// move). Otherwise it checks free space at the destination before copying a
+/// single byte, so a too-small target fails fast with a clear message
+/// instead of partway through a multi-gigabyte copy; copies rather than
+/// renames (a rename fails outright across drives — e.g. moving from `C:` to
+/// a `D:` data disk); and only removes the old copy after every file has
+/// landed safely in the new location. The caller is responsible for having
+/// stopped anything that holds these files open (capture threads, the
+/// llama.cpp servers, the database connection) before calling this —
+/// copying files still being written by a live connection would race.
+pub fn relocate_or_set(new_root: &Path, mut on_progress: impl FnMut(u64, u64)) -> Result<(), String> {
     if new_root.as_os_str().is_empty() {
         return Err("no destination directory was provided".into());
     }
-    let current = data_dir().to_path_buf();
+    let Some(current) = current() else {
+        let dir = chronicle_subfolder(new_root);
+        std::fs::create_dir_all(&dir)
+            .map_err(|error| format!("failed to create {}: {error}", dir.display()))?;
+        write_pointer(new_root)
+            .map_err(|error| format!("failed to remember the chosen data directory: {error}"))?;
+        *cell().lock().unwrap() = Some(dir);
+        return Ok(());
+    };
     let dest = chronicle_subfolder(new_root);
     if dest == current {
         return Ok(());
@@ -211,5 +192,6 @@ pub fn relocate(new_root: &Path, mut on_progress: impl FnMut(u64, u64)) -> Resul
     if let Err(error) = std::fs::remove_dir_all(&current) {
         tracing::warn!(%error, path = %current.display(), "moved data to the new directory but failed to remove the old copy; remove it manually if disk space matters");
     }
+    *cell().lock().unwrap() = Some(dest);
     Ok(())
 }

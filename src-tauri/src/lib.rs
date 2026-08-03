@@ -32,11 +32,14 @@ pub fn run() {
         .with_target(false)
         .init();
 
-    // Resolved first (and, on a first run, asks the user to pick a folder):
-    // both the sqlite database below and the llama.cpp downloads in
-    // `local_ai_setup` write under this one directory.
-    let data_dir = data_directory::data_dir();
-    tracing::info!(path = %data_dir.display(), "using data directory");
+    // Never blocks: if the user hasn't chosen a data directory yet (see
+    // `data_directory`), `AppState::initialize` below runs in a temporary,
+    // non-persistent mode instead of prompting here. The user picks one from
+    // Settings when they set up local AI.
+    match data_directory::current() {
+        Some(dir) => tracing::info!(path = %dir.display(), "using data directory"),
+        None => tracing::info!("no data directory chosen yet; running in temporary mode until Settings is used to pick one"),
+    }
 
     // Database open failures are recoverable: AppState::initialize() falls
     // back to a transient in-memory database and records the failure so the

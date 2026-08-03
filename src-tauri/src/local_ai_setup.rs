@@ -9,9 +9,10 @@
 //! downloads it. This module only downloads the GGUF model files (Gemma 3
 //! for chat/vision, EmbeddingGemma for embeddings, both from their official
 //! Hugging Face repos) into `<data dir>\llama\models` (see
-//! `data_directory::data_dir`, the folder the user chose on first run),
-//! starts/stops the two local servers, and removes downloaded model files
-//! again on request. Every step is UI-triggered and streams real,
+//! `data_directory::current`, the folder the user chooses from Settings —
+//! the download commands below refuse to run until one is chosen), starts/
+//! stops the two local servers, and removes downloaded model files again on
+//! request. Every step is UI-triggered and streams real,
 //! byte-accurate progress back as `llama-setup-progress` events (also
 //! mirrored to `tracing`, so the same information is visible in the
 //! `npm run dev` terminal and the app UI). Nothing here runs automatically
@@ -148,22 +149,19 @@ fn download_with_progress(app: &AppHandle, label: &str, url: &str, dest: &Path) 
     Ok(())
 }
 
+const NO_DATA_DIRECTORY_ERROR: &str =
+    "Choose a data directory in Settings before downloading local AI models.";
+
 /// Downloads the Gemma 3 chat/vision model and its multimodal projector.
 #[tauri::command]
 pub async fn setup_download_chat_model(app: AppHandle) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
-        download_with_progress(
-            &app,
-            "Gemma 3 chat model",
-            engine_paths::CHAT_MODEL_URL,
-            &engine_paths::chat_model(),
-        )?;
-        download_with_progress(
-            &app,
-            "Gemma 3 vision projector",
-            engine_paths::MMPROJ_URL,
-            &engine_paths::mmproj(),
-        )
+        let (Some(chat_model), Some(mmproj)) = (engine_paths::chat_model(), engine_paths::mmproj())
+        else {
+            return Err(NO_DATA_DIRECTORY_ERROR.to_string());
+        };
+        download_with_progress(&app, "Gemma 3 chat model", engine_paths::CHAT_MODEL_URL, &chat_model)?;
+        download_with_progress(&app, "Gemma 3 vision projector", engine_paths::MMPROJ_URL, &mmproj)
     })
     .await
     .map_err(|error| error.to_string())?
@@ -173,12 +171,10 @@ pub async fn setup_download_chat_model(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn setup_download_embed_model(app: AppHandle) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
-        download_with_progress(
-            &app,
-            "EmbeddingGemma model",
-            engine_paths::EMBED_MODEL_URL,
-            &engine_paths::embed_model(),
-        )
+        let Some(embed_model) = engine_paths::embed_model() else {
+            return Err(NO_DATA_DIRECTORY_ERROR.to_string());
+        };
+        download_with_progress(&app, "EmbeddingGemma model", engine_paths::EMBED_MODEL_URL, &embed_model)
     })
     .await
     .map_err(|error| error.to_string())?
@@ -241,8 +237,13 @@ pub async fn setup_remove_chat_model(state: State<'_, AppState>) -> Result<(), S
     stop_process(&state.llama_chat_process);
     tracing::info!(target: "chronicle::local_ai_setup", "removing Gemma 3 chat model");
     tauri::async_runtime::spawn_blocking(|| {
-        remove_file_if_exists(&engine_paths::chat_model())?;
-        remove_file_if_exists(&engine_paths::mmproj())
+        if let Some(chat_model) = engine_paths::chat_model() {
+            remove_file_if_exists(&chat_model)?;
+        }
+        if let Some(mmproj) = engine_paths::mmproj() {
+            remove_file_if_exists(&mmproj)?;
+        }
+        Ok(())
     })
     .await
     .map_err(|error| error.to_string())?
@@ -254,7 +255,10 @@ pub async fn setup_remove_chat_model(state: State<'_, AppState>) -> Result<(), S
 pub async fn setup_remove_embed_model(state: State<'_, AppState>) -> Result<(), String> {
     stop_process(&state.llama_embed_process);
     tracing::info!(target: "chronicle::local_ai_setup", "removing EmbeddingGemma model");
-    tauri::async_runtime::spawn_blocking(|| remove_file_if_exists(&engine_paths::embed_model()))
-        .await
-        .map_err(|error| error.to_string())?
+    tauri::async_runtime::spawn_blocking(|| match engine_paths::embed_model() {
+        Some(embed_model) => remove_file_if_exists(&embed_model),
+        None => Ok(()),
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }

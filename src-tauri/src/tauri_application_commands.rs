@@ -86,25 +86,38 @@ impl AppState {
     /// across restarts) and records the failure in `startup_error` so the UI
     /// can surface it instead of the app disappearing silently.
     pub fn initialize() -> Self {
-        let (database, startup_error) = match Database::open() {
-            Ok(database) => (database, None),
-            Err(error) => {
-                tracing::error!(%error, "database initialization failed; falling back to an in-memory database");
-                let fallback = Database::open_in_memory_degraded().unwrap_or_else(|fallback_error| {
-                    // Even the in-memory fallback failed. This should be
-                    // effectively impossible (no I/O involved), but rather
-                    // than panic we degrade further: continue with no
-                    // persistence rather than crash the desktop shell.
-                    tracing::error!(%fallback_error, "in-memory fallback database also failed to initialize");
-                    Database::open_in_memory_degraded()
-                        .expect("in-memory sqlite connection is expected to always succeed")
-                });
-                (
-                    fallback,
-                    Some(format!(
-                        "Chronicle could not open its local database and is running in a temporary, non-persistent mode: {error}"
-                    )),
-                )
+        // No data directory chosen yet is not a failure: the user picks one
+        // from Settings when they set up local AI, and until then Chronicle
+        // simply runs on a transient in-memory database rather than
+        // blocking startup on a folder-choose dialog.
+        let data_dir_configured = crate::data_directory::current().is_some();
+        let (database, startup_error) = if !data_dir_configured {
+            (
+                Database::open_in_memory_degraded()
+                    .expect("in-memory sqlite connection is expected to always succeed"),
+                None,
+            )
+        } else {
+            match Database::open() {
+                Ok(database) => (database, None),
+                Err(error) => {
+                    tracing::error!(%error, "database initialization failed; falling back to an in-memory database");
+                    let fallback = Database::open_in_memory_degraded().unwrap_or_else(|fallback_error| {
+                        // Even the in-memory fallback failed. This should be
+                        // effectively impossible (no I/O involved), but rather
+                        // than panic we degrade further: continue with no
+                        // persistence rather than crash the desktop shell.
+                        tracing::error!(%fallback_error, "in-memory fallback database also failed to initialize");
+                        Database::open_in_memory_degraded()
+                            .expect("in-memory sqlite connection is expected to always succeed")
+                    });
+                    (
+                        fallback,
+                        Some(format!(
+                            "Chronicle could not open its local database and is running in a temporary, non-persistent mode: {error}"
+                        )),
+                    )
+                }
             }
         };
         if let Err(error) = database.seed_ready_event() {
@@ -116,25 +129,30 @@ impl AppState {
             .flatten()
             .and_then(|json| serde_json::from_str(&json).ok())
             .unwrap_or_default();
+        // Nothing to start yet if no data directory is configured: the
+        // engine binary is bundled, but the model files it would load live
+        // under the (not yet chosen) data directory.
         let engine = LlamaCppProvider::default();
-        let llama_chat_process = match engine.start_chat_server_if_needed() {
-            Ok(process) => process,
-            Err(error) => {
+        let llama_chat_process = if data_dir_configured {
+            engine.start_chat_server_if_needed().unwrap_or_else(|error| {
                 tracing::warn!(%error, "chat/vision engine was not started; local AI will retry through the queue");
                 None
-            }
+            })
+        } else {
+            None
         };
-        let llama_embed_process = match engine.start_embed_server_if_needed() {
-            Ok(process) => process,
-            Err(error) => {
+        let llama_embed_process = if data_dir_configured {
+            engine.start_embed_server_if_needed().unwrap_or_else(|error| {
                 tracing::warn!(%error, "embedding engine was not started; local AI will retry through the queue");
                 None
-            }
+            })
+        } else {
+            None
         };
         // Only pool connections to the on-disk file: when we fell back to an
         // in-memory writer, a pooled reader would open an unrelated (or
         // stale) chronicle.db file rather than the live in-memory database.
-        let reader_pool = if startup_error.is_none() {
+        let reader_pool = if data_dir_configured && startup_error.is_none() {
             match local_sqlite_event_database::open_reader_pool() {
                 Ok(pool) => Some(pool),
                 Err(error) => {
@@ -843,10 +861,10 @@ pub fn stop_capture(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 /// The directory Chronicle currently stores its data (database, downloaded
-/// models) under.
+/// models) under, or `None` if the user hasn't chosen one yet.
 #[tauri::command]
-pub fn get_data_directory() -> String {
-    crate::data_directory::data_dir().display().to_string()
+pub fn get_data_directory() -> Option<String> {
+    crate::data_directory::current().map(|dir| dir.display().to_string())
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -856,17 +874,17 @@ pub struct DataDirectoryMoveProgress {
     pub percent: f32,
 }
 
-/// Moves Chronicle's data to a new, user-chosen directory and relaunches the
-/// app so it opens fresh against the new location.
+/// Picks (if none is set yet) or moves (if one already is) Chronicle's data
+/// directory, then relaunches the app so it opens fresh against it.
 ///
 /// Everything that could hold a file open under the current data directory
 /// is stopped first — capture threads, both llama.cpp servers, and the
 /// active sqlite connection is checkpointed (WAL merged into the main file)
-/// so the copy underneath `data_directory::relocate` sees a consistent,
-/// unlocked-as-possible set of files. There is no partial/hot-swap path:
-/// like first-run resolution, this refuses to guess, and the only way the
-/// new location actually takes effect is a full relaunch that re-resolves
-/// `data_directory::data_dir()` from the updated pointer file.
+/// so the copy underneath `data_directory::relocate_or_set` sees a
+/// consistent, unlocked-as-possible set of files. There is no partial/hot-swap
+/// path: like first-run resolution, this refuses to guess, and the only way
+/// the new location actually takes effect is a full relaunch that
+/// re-resolves `data_directory::current()` from the updated pointer file.
 #[tauri::command]
 pub async fn change_data_directory(
     app: tauri::AppHandle,
@@ -884,7 +902,7 @@ pub async fn change_data_directory(
             .pick_folder()
             .ok_or_else(|| "no folder was chosen".to_string())?;
         let mut last_emit = std::time::Instant::now() - std::time::Duration::from_secs(1);
-        crate::data_directory::relocate(&chosen, move |copied, total| {
+        crate::data_directory::relocate_or_set(&chosen, move |copied, total| {
             if last_emit.elapsed() < std::time::Duration::from_millis(200) && copied < total {
                 return;
             }

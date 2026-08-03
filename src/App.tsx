@@ -8,12 +8,16 @@ const time=(n:number)=>new Date(n/1e6).toLocaleTimeString([],{hour:"2-digit",min
 function App(){const [data,setData]=useState<SemanticEvent[]>([]),[rawData,setRawData]=useState<Overview[]>([]),[query,setQuery]=useState(""),[section,setSection]=useState<"timeline"|"search"|"raw"|"settings">("timeline"),[settings,setSettings]=useState<Settings|null>(null),[queue,setQueue]=useState<Queue>({pending:0,processing:0,complete:0,failed:0,cancelled:0}),[startupError,setStartupError]=useState<string|null>(null),[setup,setSetup]=useState<SetupStatus|null>(null); const refresh=()=>{insights(section==="search"?query:undefined).then(setData);if(section==="raw")raw().then(setRawData)}; useEffect(()=>{refresh();invoke<Settings>("get_capture_settings").then(setSettings).catch(()=>{});invoke<Queue>("processing_queue_status").then(setQueue).catch(()=>{});invoke<string|null>("startup_diagnostics").then(setStartupError).catch(()=>{});invoke<SetupStatus>("local_ai_setup_status").then(setSetup).catch(()=>{})},[]);useEffect(()=>{if(section==="search"||section==="raw")refresh()},[query,section]);const capture=async(enabled:boolean)=>{await invoke(enabled?"start_capture":"stop_capture");setSettings(s=>s?{...s,enabled}:s)};const permission=async(input:"mouse"|"keyboard",enabled:boolean)=>setSettings(await invoke<Settings>("set_input_permission",{input,enabled}));const exportData=async()=>{const link=document.createElement("a");link.href=URL.createObjectURL(new Blob([await invoke<string>("export_data")],{type:"application/json"}));link.download="chronicle-export.json";link.click()};const del=async()=>{if(confirm("Delete all Chronicle data?")){await invoke("delete_all_data");setData([]);setRawData([])}};return <main className="app-shell">{startupError&&<div className="banner banner-error" role="alert">{startupError}</div>}{setup&&!setupComplete(setup)&&section!=="settings"&&<div className="banner banner-info" role="status">Local AI setup isn't finished yet — semantic insights won't appear until the local engine and its models are ready. <button className="quiet-button" onClick={()=>setSection("settings")}>Finish setup</button></div>}<aside className="sidebar"><div className="brand"><span className="brand-mark">C</span><span>Chronicle</span></div><nav><button className={`nav-item ${section==="timeline"?"active":""}`} onClick={()=>setSection("timeline")}>Timeline</button><button className={`nav-item ${section==="search"?"active":""}`} onClick={()=>setSection("search")}>Search</button><button className={`nav-item ${section==="raw"?"active":""}`} onClick={()=>setSection("raw")}>Raw Evidence</button><button className={`nav-item ${section==="settings"?"active":""}`} onClick={()=>setSection("settings")}>Settings</button></nav><div className="capture-card"><div className={`status-dot ${settings?.enabled?"on":""}`}/><div><strong>{settings?.enabled?"Capture enabled":"Capture is off"}</strong><span>{queue.pending} processing tasks pending.</span></div></div></aside><section className="content"><header className="topbar"><div><p className="eyebrow">LOCAL MEMORY ENGINE</p><h1>{section==="raw"?"Raw Evidence":section[0].toUpperCase()+section.slice(1)}</h1></div><button className="quiet-button" onClick={refresh}>Refresh</button></header>{section==="settings"?<SettingsPage settings={settings} capture={capture} permission={permission} exportData={exportData} del={del}/>:section==="raw"?<RawPage data={rawData}/>:<><div className="hero"><div><p className="eyebrow">TODAY</p><h2>Your computer, remembered.</h2><p className="muted">Only processed local-model insights appear in the main feed.</p></div><div className="metric"><span>Insights ready</span><strong>{data.length}</strong></div></div>{section==="search"&&<input className="search-input" placeholder="Search processed activity…" value={query} onChange={e=>setQuery(e.target.value)}/>}<section className="timeline"><div className="section-heading"><h3>{section==="search"?"Processed results":"Recent insights"}</h3><span className="muted">LLM processed</span></div>{data.length?data.map(e=><article className="event-row" key={e.id}><time>{time(e.timestamp_ns)}</time><div className="event-icon">•</div><div className="event-body"><div className="event-top"><strong>{e.app_name||"Unknown application"}</strong><span className="event-status">{Math.round(e.confidence*100)}% confidence</span></div><p>{e.summary}</p><span className="event-type">{e.category} · {e.model_name}</span></div></article>):<p className="muted empty">No processed insights yet.</p>}</section>{section==="timeline"&&<button className="quiet-button" onClick={()=>setSection("raw")}>View raw capture evidence</button>}</>}</section></main>}
 function LocalAiSetupPanel(){
   const [status,setStatus]=useState<SetupStatus|null>(null);
+  const [dataDirConfigured,setDataDirConfigured]=useState(false);
   const [busy,setBusy]=useState<string|null>(null);
   const [progress,setProgress]=useState<number|null>(null);
   const [progressLabel,setProgressLabel]=useState<string|null>(null);
   const [progressBytes,setProgressBytes]=useState<{downloaded:number;total?:number|null}|null>(null);
   const [error,setError]=useState<string|null>(null);
-  const refreshStatus=()=>invoke<SetupStatus>("local_ai_setup_status").then(setStatus).catch(()=>{});
+  const refreshStatus=()=>{
+    invoke<SetupStatus>("local_ai_setup_status").then(setStatus).catch(()=>{});
+    invoke<string|null>("get_data_directory").then(dir=>setDataDirConfigured(!!dir)).catch(()=>{});
+  };
   useEffect(()=>{
     refreshStatus();
     const progressListener=listen<DownloadProgress>("llama-setup-progress",e=>{
@@ -42,18 +46,19 @@ function LocalAiSetupPanel(){
   return <div className="setup-panel">
     <h3>Local AI setup</h3>
     <p className="muted">Chronicle analyzes activity entirely on this machine via a bundled llama.cpp engine — no separate app to install, nothing leaves your computer. {ready?"Everything is set up and ready.":"Finish setup once to enable semantic search and insights."}</p>
+    {!dataDirConfigured&&<p className="banner banner-info" role="status">Choose a data directory above first — models download into it.</p>}
     <ul className="setup-checklist">
       <li className={status.chat_model_installed?"done":""}>
         <span>Analysis model ({status.chat_model_name})</span>
         <span className="button-row">
-          {!status.chat_model_installed&&<button className="quiet-button" disabled={!!busy} onClick={()=>run("setup_download_chat_model",()=>invoke("setup_download_chat_model"))}>{busy==="setup_download_chat_model"?"Downloading…":"Download"}</button>}
+          {!status.chat_model_installed&&<button className="quiet-button" disabled={!!busy||!dataDirConfigured} onClick={()=>run("setup_download_chat_model",()=>invoke("setup_download_chat_model"))}>{busy==="setup_download_chat_model"?"Downloading…":"Download"}</button>}
           {status.chat_model_installed&&<button className="quiet-button danger-button" disabled={!!busy} onClick={()=>removeArtifact(status.chat_model_name,"setup_remove_chat_model")}>Remove</button>}
         </span>
       </li>
       <li className={status.embed_model_installed?"done":""}>
         <span>Embedding model ({status.embed_model_name})</span>
         <span className="button-row">
-          {!status.embed_model_installed&&<button className="quiet-button" disabled={!!busy} onClick={()=>run("setup_download_embed_model",()=>invoke("setup_download_embed_model"))}>{busy==="setup_download_embed_model"?"Downloading…":"Download"}</button>}
+          {!status.embed_model_installed&&<button className="quiet-button" disabled={!!busy||!dataDirConfigured} onClick={()=>run("setup_download_embed_model",()=>invoke("setup_download_embed_model"))}>{busy==="setup_download_embed_model"?"Downloading…":"Download"}</button>}
           {status.embed_model_installed&&<button className="quiet-button danger-button" disabled={!!busy} onClick={()=>removeArtifact(status.embed_model_name,"setup_remove_embed_model")}>Remove</button>}
         </span>
       </li>
@@ -67,17 +72,22 @@ function LocalAiSetupPanel(){
   </div>;
 }
 function DataDirectoryPanel(){
-  const [path,setPath]=useState<string|null>(null);
+  const [path,setPath]=useState<string|null|undefined>(undefined);
   const [busy,setBusy]=useState(false);
   const [moveProgress,setMoveProgress]=useState<MoveProgress|null>(null);
   const [error,setError]=useState<string|null>(null);
-  useEffect(()=>{invoke<string>("get_data_directory").then(setPath).catch(()=>{})},[]);
+  const configured=!!path;
+  const refreshPath=()=>invoke<string|null>("get_data_directory").then(setPath).catch(()=>{});
+  useEffect(()=>{refreshPath()},[]);
   useEffect(()=>{
     const progressListener=listen<MoveProgress>("data-directory-move-progress",e=>setMoveProgress(e.payload));
     return()=>{progressListener.then(f=>f())};
   },[]);
   const change=async()=>{
-    if(!confirm("Chronicle will check the chosen folder has enough free space, move all of its data there, then restart. Continue?"))return;
+    const prompt=configured
+      ?"Chronicle will check the chosen folder has enough free space, move all of its data there, then restart. Continue?"
+      :"Choose a folder for Chronicle to store its data and downloaded models. Chronicle will restart once it's set.";
+    if(!confirm(prompt))return;
     setBusy(true);setError(null);setMoveProgress(null);
     try{await invoke("change_data_directory")}
     catch(err){setError(String(err));setBusy(false);setMoveProgress(null)}
@@ -88,10 +98,10 @@ function DataDirectoryPanel(){
   </div>:null;
   return <div className="setup-panel">
     <h3>Data directory</h3>
-    <p className="muted">Everything Chronicle stores — the event database and downloaded models — lives in this folder.</p>
-    <p className="setting-row"><span><strong>Current location</strong><small>{path||"Loading…"}</small></span><button className="quiet-button" disabled={busy} onClick={change}>{busy?"Moving data…":"Change directory…"}</button></p>
+    <p className="muted">Everything Chronicle stores — the event database and downloaded models — lives in this folder. {configured?"":"Not set yet — Chronicle is running in a temporary, non-persistent mode until you choose one."}</p>
+    <p className="setting-row"><span><strong>Current location</strong><small>{path===undefined?"Loading…":path||"Not set"}</small></span><button className="quiet-button" disabled={busy} onClick={change}>{busy?"Moving data…":configured?"Change directory…":"Choose directory…"}</button></p>
     {moveProgressBar}
-    {busy&&!moveProgress&&<p className="muted">Checking free space and preparing the move…</p>}
+    {busy&&!moveProgress&&<p className="muted">Checking free space and preparing…</p>}
     {error&&<p className="banner banner-error">{error}</p>}
   </div>;
 }
