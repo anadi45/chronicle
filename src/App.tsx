@@ -43,24 +43,17 @@ function LocalAiSetupPanel(){
     <h3>Local AI setup</h3>
     <p className="muted">Chronicle analyzes activity entirely on this machine via a bundled llama.cpp engine — no separate app to install, nothing leaves your computer. {ready?"Everything is set up and ready.":"Finish setup once to enable semantic search and insights."}</p>
     <ul className="setup-checklist">
-      <li className={status.runtime_installed?"done":""}>
-        <span>Inference engine downloaded</span>
-        <span className="button-row">
-          {!status.runtime_installed&&<button className="quiet-button" disabled={!!busy} onClick={()=>run("setup_download_runtime",()=>invoke("setup_download_runtime"))}>{busy==="setup_download_runtime"?"Downloading…":"Download"}</button>}
-          {status.runtime_installed&&<button className="quiet-button danger-button" disabled={!!busy} onClick={()=>removeArtifact("the inference engine","setup_remove_runtime")}>Remove</button>}
-        </span>
-      </li>
       <li className={status.chat_model_installed?"done":""}>
         <span>Analysis model ({status.chat_model_name})</span>
         <span className="button-row">
-          {status.runtime_installed&&!status.chat_model_installed&&<button className="quiet-button" disabled={!!busy} onClick={()=>run("setup_download_chat_model",()=>invoke("setup_download_chat_model"))}>{busy==="setup_download_chat_model"?"Downloading…":"Download"}</button>}
+          {!status.chat_model_installed&&<button className="quiet-button" disabled={!!busy} onClick={()=>run("setup_download_chat_model",()=>invoke("setup_download_chat_model"))}>{busy==="setup_download_chat_model"?"Downloading…":"Download"}</button>}
           {status.chat_model_installed&&<button className="quiet-button danger-button" disabled={!!busy} onClick={()=>removeArtifact(status.chat_model_name,"setup_remove_chat_model")}>Remove</button>}
         </span>
       </li>
       <li className={status.embed_model_installed?"done":""}>
         <span>Embedding model ({status.embed_model_name})</span>
         <span className="button-row">
-          {status.runtime_installed&&!status.embed_model_installed&&<button className="quiet-button" disabled={!!busy} onClick={()=>run("setup_download_embed_model",()=>invoke("setup_download_embed_model"))}>{busy==="setup_download_embed_model"?"Downloading…":"Download"}</button>}
+          {!status.embed_model_installed&&<button className="quiet-button" disabled={!!busy} onClick={()=>run("setup_download_embed_model",()=>invoke("setup_download_embed_model"))}>{busy==="setup_download_embed_model"?"Downloading…":"Download"}</button>}
           {status.embed_model_installed&&<button className="quiet-button danger-button" disabled={!!busy} onClick={()=>removeArtifact(status.embed_model_name,"setup_remove_embed_model")}>Remove</button>}
         </span>
       </li>

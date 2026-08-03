@@ -3,20 +3,23 @@
 //! Chronicle's semantic analysis and embeddings run on a bundled llama.cpp
 //! engine (`llama-server`) rather than a separately installed application:
 //! nothing here shows up in the Start Menu, the system tray, or Windows'
-//! installed-apps list. This module downloads the `llama-server` binary
-//! (from llama.cpp's own GitHub releases) and the GGUF model files (Gemma 3
+//! installed-apps list. The `llama-server` binary itself ships inside the
+//! app install (see `src-tauri/resources/llama` and
+//! `local_model_provider::engine_paths::runtime_dir`) — nothing here
+//! downloads it. This module only downloads the GGUF model files (Gemma 3
 //! for chat/vision, EmbeddingGemma for embeddings, both from their official
-//! Hugging Face repos) into `<data dir>\llama` (see `data_directory::data_dir`,
-//! the folder the user chose on first run), starts/stops
-//! the two local servers, and removes any of those files again on request.
-//! Every step is UI-triggered and streams real, byte-accurate progress back
-//! as `llama-setup-progress` events (also mirrored to `tracing`, so the same
-//! information is visible in the `npm run dev` terminal and the app UI).
-//! Nothing here runs automatically or silently in the background.
+//! Hugging Face repos) into `<data dir>\llama\models` (see
+//! `data_directory::data_dir`, the folder the user chose on first run),
+//! starts/stops the two local servers, and removes downloaded model files
+//! again on request. Every step is UI-triggered and streams real,
+//! byte-accurate progress back as `llama-setup-progress` events (also
+//! mirrored to `tracing`, so the same information is visible in the
+//! `npm run dev` terminal and the app UI). Nothing here runs automatically
+//! or silently in the background.
 
 use crate::local_model_provider::{engine_paths, shared_agent, LlamaCppProvider};
 use crate::tauri_application_commands::AppState;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -145,109 +148,6 @@ fn download_with_progress(app: &AppHandle, label: &str, url: &str, dest: &Path) 
     Ok(())
 }
 
-#[derive(Debug, Deserialize)]
-struct GithubRelease {
-    tag_name: String,
-    assets: Vec<GithubAsset>,
-}
-#[derive(Debug, Deserialize)]
-struct GithubAsset {
-    name: String,
-    browser_download_url: String,
-}
-
-/// Finds the Windows CPU build in llama.cpp's latest GitHub release. CPU-only
-/// is the safe universal default — every Windows machine can run it — at the
-/// cost of speed; picking a CUDA/Vulkan build automatically based on detected
-/// hardware is tracked as follow-up work, not attempted here.
-fn find_windows_cpu_asset() -> Result<GithubAsset, String> {
-    let url = "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest";
-    let mut response = shared_agent()
-        .get(url)
-        .header("User-Agent", "Chronicle-App")
-        .call()
-        .map_err(|error| format!("failed to query llama.cpp releases: {error}"))?;
-    let payload = response
-        .body_mut()
-        .read_to_string()
-        .map_err(|error| format!("invalid llama.cpp release response: {error}"))?;
-    let release: GithubRelease = serde_json::from_str(&payload)
-        .map_err(|error| format!("invalid llama.cpp release JSON: {error}"))?;
-    release
-        .assets
-        .into_iter()
-        .find(|asset| asset.name.contains("bin-win-cpu-x64") && asset.name.ends_with(".zip"))
-        .ok_or_else(|| format!("no Windows CPU build found in llama.cpp release {}", release.tag_name))
-}
-
-/// Extracts every file in `zip_path` into `dest_dir`. llama.cpp's release
-/// zips sometimes wrap their contents in a single top-level folder and
-/// sometimes don't; this strips one leading path component only when an
-/// entry actually has one, so both layouts land the binary and its DLLs
-/// directly under `dest_dir`.
-fn extract_zip(zip_path: &Path, dest_dir: &Path) -> Result<(), String> {
-    let file = std::fs::File::open(zip_path)
-        .map_err(|error| format!("failed to open downloaded archive: {error}"))?;
-    let mut archive =
-        zip::ZipArchive::new(file).map_err(|error| format!("invalid archive: {error}"))?;
-    for index in 0..archive.len() {
-        let mut entry = archive
-            .by_index(index)
-            .map_err(|error| format!("invalid archive entry: {error}"))?;
-        let Some(entry_path) = entry.enclosed_name() else {
-            continue;
-        };
-        let mut components: Vec<_> = entry_path.components().collect();
-        if components.len() > 1 {
-            components.remove(0);
-        }
-        let relative: std::path::PathBuf = components.iter().collect();
-        if relative.as_os_str().is_empty() {
-            continue;
-        }
-        let out_path = dest_dir.join(&relative);
-        if entry.is_dir() {
-            std::fs::create_dir_all(&out_path)
-                .map_err(|error| format!("failed to create {}: {error}", out_path.display()))?;
-            continue;
-        }
-        if let Some(parent) = out_path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
-        }
-        let mut out_file = std::fs::File::create(&out_path)
-            .map_err(|error| format!("failed to write {}: {error}", out_path.display()))?;
-        std::io::copy(&mut entry, &mut out_file)
-            .map_err(|error| format!("failed extracting {}: {error}", out_path.display()))?;
-    }
-    Ok(())
-}
-
-/// Downloads and extracts the `llama-server` runtime (binary + DLLs).
-#[tauri::command]
-pub async fn setup_download_runtime(app: AppHandle) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let asset = find_windows_cpu_asset()?;
-        let zip_path = engine_paths::runtime_dir().join("llama-runtime.part.zip");
-        download_with_progress(
-            &app,
-            "llama.cpp runtime",
-            &asset.browser_download_url,
-            &zip_path,
-        )?;
-        extract_zip(&zip_path, &engine_paths::runtime_dir())?;
-        let _ = std::fs::remove_file(&zip_path);
-        if !engine_paths::runtime_installed() {
-            return Err(
-                "llama-server.exe was not found after extracting the downloaded archive".into(),
-            );
-        }
-        Ok(())
-    })
-    .await
-    .map_err(|error| error.to_string())?
-}
-
 /// Downloads the Gemma 3 chat/vision model and its multimodal projector.
 #[tauri::command]
 pub async fn setup_download_chat_model(app: AppHandle) -> Result<(), String> {
@@ -333,27 +233,9 @@ fn remove_file_if_exists(path: &Path) -> Result<(), String> {
     }
 }
 
-/// Removes the `llama-server` runtime. Stops both servers first: on Windows
-/// a running process keeps its own executable file locked, so deleting it
-/// out from under a live server would fail.
-#[tauri::command]
-pub async fn setup_remove_runtime(state: State<'_, AppState>) -> Result<(), String> {
-    stop_process(&state.llama_chat_process);
-    stop_process(&state.llama_embed_process);
-    tracing::info!(target: "chronicle::local_ai_setup", "removing llama.cpp runtime");
-    tauri::async_runtime::spawn_blocking(|| {
-        match std::fs::remove_dir_all(engine_paths::runtime_dir()) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(format!("failed to remove the llama.cpp runtime: {error}")),
-        }
-    })
-    .await
-    .map_err(|error| error.to_string())?
-}
-
 /// Removes the Gemma 3 chat/vision model and its projector. Stops the chat
-/// server first for the same file-locking reason as `setup_remove_runtime`.
+/// server first: on Windows a running server keeps its model files locked,
+/// so deleting them out from under it would fail.
 #[tauri::command]
 pub async fn setup_remove_chat_model(state: State<'_, AppState>) -> Result<(), String> {
     stop_process(&state.llama_chat_process);
@@ -367,7 +249,7 @@ pub async fn setup_remove_chat_model(state: State<'_, AppState>) -> Result<(), S
 }
 
 /// Removes the EmbeddingGemma model. Stops the embedding server first for
-/// the same file-locking reason as `setup_remove_runtime`.
+/// the same file-locking reason as `setup_remove_chat_model`.
 #[tauri::command]
 pub async fn setup_remove_embed_model(state: State<'_, AppState>) -> Result<(), String> {
     stop_process(&state.llama_embed_process);

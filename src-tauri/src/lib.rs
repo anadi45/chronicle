@@ -91,11 +91,9 @@ pub fn run() {
             tauri_application_commands::processing_status_for_event,
             tauri_application_commands::startup_diagnostics,
             local_ai_setup::local_ai_setup_status,
-            local_ai_setup::setup_download_runtime,
             local_ai_setup::setup_download_chat_model,
             local_ai_setup::setup_download_embed_model,
             local_ai_setup::setup_start_engine,
-            local_ai_setup::setup_remove_runtime,
             local_ai_setup::setup_remove_chat_model,
             local_ai_setup::setup_remove_embed_model
         ])

@@ -5,5 +5,5 @@
   "identifier": "com.chronicle.desktop",
   "build": { "beforeDevCommand": "npm run dev:vite", "devUrl": "http://localhost:1420", "beforeBuildCommand": "npm run build", "frontendDist": "../dist" },
   "app": { "windows": [{ "title": "Chronicle", "width": 1200, "height": 800, "minWidth": 900, "minHeight": 600 }], "security": { "csp": null } },
-  "bundle": { "active": true, "targets": "all", "icon": ["icons/icon.ico", "icons/icon.icns", "icons/icon.png"] }
+  "bundle": { "active": true, "targets": "all", "icon": ["icons/icon.ico", "icons/icon.icns", "icons/icon.png"], "resources": { "resources/llama/*": "llama/" } }
 }
