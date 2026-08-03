@@ -297,6 +297,16 @@ impl Database {
         )
     }
 
+    /// Merges the WAL file back into the main database file. Called before
+    /// moving the data directory to a new location so the copy sees the
+    /// database's actual contents rather than a stale main file plus a
+    /// separate `-wal` file that a straight file copy would otherwise have
+    /// to carry over just as faithfully.
+    pub fn checkpoint_wal(&self) -> Result<()> {
+        self.connection
+            .pragma_update(None, "wal_checkpoint", "TRUNCATE")
+    }
+
     pub fn save_setting(&self, key: &str, value_json: &str) -> Result<()> {
         self.connection.execute("INSERT INTO app_settings(key, value_json, updated_at) VALUES (?1, ?2, ?3) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at", params![key, value_json, Utc::now().to_rfc3339()])?;
         Ok(())

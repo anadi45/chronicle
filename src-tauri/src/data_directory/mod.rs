@@ -86,3 +86,51 @@ pub fn data_dir() -> &'static Path {
 pub fn database_file() -> PathBuf {
     data_dir().join("chronicle.db")
 }
+
+/// Recursively copies every entry under `src` into `dest` (which must
+/// already exist), preserving relative structure.
+fn copy_dir_recursive(src: &Path, dest: &Path) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let target = dest.join(entry.file_name());
+        if file_type.is_dir() {
+            std::fs::create_dir_all(&target)?;
+            copy_dir_recursive(&entry.path(), &target)?;
+        } else if file_type.is_file() {
+            std::fs::copy(entry.path(), &target)?;
+        }
+    }
+    Ok(())
+}
+
+/// Moves Chronicle's data from the current data directory to `new_dir` and
+/// remembers `new_dir` as the new choice. `new_dir` must be a real,
+/// explicitly chosen path — same "no default" rule as first-run resolution.
+///
+/// Copies rather than renames (a rename fails outright across drives, which
+/// is a completely ordinary choice here — e.g. moving from `C:` to a `D:`
+/// data disk) and only removes the old copy after every file has landed
+/// safely in the new location. The caller is responsible for having stopped
+/// anything that holds these files open (capture threads, the llama.cpp
+/// servers, the database connection) before calling this — copying files
+/// still being written by a live connection would race.
+pub fn relocate(new_dir: &Path) -> Result<(), String> {
+    if new_dir.as_os_str().is_empty() {
+        return Err("no destination directory was provided".into());
+    }
+    let current = data_dir().to_path_buf();
+    if new_dir == current {
+        return Ok(());
+    }
+    std::fs::create_dir_all(new_dir)
+        .map_err(|error| format!("failed to create {}: {error}", new_dir.display()))?;
+    copy_dir_recursive(&current, new_dir)
+        .map_err(|error| format!("failed to copy data to {}: {error}", new_dir.display()))?;
+    write_pointer(new_dir)
+        .map_err(|error| format!("failed to remember the new data directory: {error}"))?;
+    if let Err(error) = std::fs::remove_dir_all(&current) {
+        tracing::warn!(%error, path = %current.display(), "moved data to the new directory but failed to remove the old copy; remove it manually if disk space matters");
+    }
+    Ok(())
+}

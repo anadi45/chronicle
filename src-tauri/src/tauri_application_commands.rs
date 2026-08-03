@@ -841,3 +841,50 @@ pub fn stop_capture(state: State<'_, AppState>) -> Result<(), String> {
         .map_err(|error| error.to_string())?;
     Ok(())
 }
+
+/// The directory Chronicle currently stores its data (database, downloaded
+/// models) under.
+#[tauri::command]
+pub fn get_data_directory() -> String {
+    crate::data_directory::data_dir().display().to_string()
+}
+
+/// Moves Chronicle's data to a new, user-chosen directory and relaunches the
+/// app so it opens fresh against the new location.
+///
+/// Everything that could hold a file open under the current data directory
+/// is stopped first — capture threads, both llama.cpp servers, and the
+/// active sqlite connection is checkpointed (WAL merged into the main file)
+/// so the copy underneath `data_directory::relocate` sees a consistent,
+/// unlocked-as-possible set of files. There is no partial/hot-swap path:
+/// like first-run resolution, this refuses to guess, and the only way the
+/// new location actually takes effect is a full relaunch that re-resolves
+/// `data_directory::data_dir()` from the updated pointer file.
+#[tauri::command]
+pub async fn change_data_directory(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    stop_capture_state(&state);
+    shutdown_llama_engine(&state);
+    if let Ok(database) = state.database.lock() {
+        let _ = database.checkpoint_wal();
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let chosen = rfd::FileDialog::new()
+            .set_title("Choose a new folder for Chronicle to store its data and downloaded models")
+            .pick_folder()
+            .ok_or_else(|| "no folder was chosen".to_string())?;
+        crate::data_directory::relocate(&chosen)
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    // Relaunch instead of hot-swapping the live database/model-file handles:
+    // simpler and safer than re-opening every connection in place, at the
+    // cost of a brief restart the caller should warn the user about first.
+    if let Ok(exe) = std::env::current_exe() {
+        let _ = std::process::Command::new(exe).spawn();
+    }
+    app.exit(0);
+    Ok(())
+}

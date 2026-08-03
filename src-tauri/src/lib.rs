@@ -90,6 +90,8 @@ pub fn run() {
             tauri_application_commands::retry_failed_processing_tasks,
             tauri_application_commands::processing_status_for_event,
             tauri_application_commands::startup_diagnostics,
+            tauri_application_commands::get_data_directory,
+            tauri_application_commands::change_data_directory,
             local_ai_setup::local_ai_setup_status,
             local_ai_setup::setup_download_chat_model,
             local_ai_setup::setup_download_embed_model,
