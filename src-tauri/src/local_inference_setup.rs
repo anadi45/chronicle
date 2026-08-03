@@ -88,10 +88,6 @@ fn emit_download_progress(
     let percent = total
         .filter(|&total| total > 0)
         .map(|total| (downloaded as f64 / total as f64 * 100.0) as f32);
-    let percent_display = percent
-        .map(|percent| format!(" ({percent:.0}%)"))
-        .unwrap_or_default();
-    tracing::info!(target: "chronicle::local_ai_setup", "{label}: {downloaded} bytes{percent_display}");
     let _ = app.emit(
         "llama-setup-progress",
         DownloadProgress {
@@ -108,7 +104,7 @@ fn emit_download_progress(
 /// `.part` sibling file and renames on success, so a failed/cancelled
 /// download never leaves a file that looks complete but isn't.
 fn download_with_progress(app: &AppHandle, label: &str, url: &str, dest: &Path) -> Result<(), String> {
-    tracing::info!(target: "chronicle::local_ai_setup", "downloading {label} from {url}");
+    tracing::info!(target: "chronicle::local_inference_setup", "downloading {label} from {url}");
     let response = shared_agent()
         .get(url)
         .call()
@@ -145,7 +141,7 @@ fn download_with_progress(app: &AppHandle, label: &str, url: &str, dest: &Path) 
     drop(file);
     std::fs::rename(&tmp_path, dest)
         .map_err(|error| format!("failed to finalize {label}: {error}"))?;
-    tracing::info!(target: "chronicle::local_ai_setup", "{label} downloaded ({downloaded} bytes)");
+    tracing::info!(target: "chronicle::local_inference_setup", "{label} downloaded ({downloaded} bytes)");
     Ok(())
 }
 
@@ -235,7 +231,7 @@ fn remove_file_if_exists(path: &Path) -> Result<(), String> {
 #[tauri::command]
 pub async fn setup_remove_chat_model(state: State<'_, AppState>) -> Result<(), String> {
     stop_process(&state.llama_chat_process);
-    tracing::info!(target: "chronicle::local_ai_setup", "removing Gemma 3 chat model");
+    tracing::info!(target: "chronicle::local_inference_setup", "removing Gemma 3 chat model");
     tauri::async_runtime::spawn_blocking(|| {
         if let Some(chat_model) = engine_paths::chat_model() {
             remove_file_if_exists(&chat_model)?;
@@ -254,7 +250,7 @@ pub async fn setup_remove_chat_model(state: State<'_, AppState>) -> Result<(), S
 #[tauri::command]
 pub async fn setup_remove_embed_model(state: State<'_, AppState>) -> Result<(), String> {
     stop_process(&state.llama_embed_process);
-    tracing::info!(target: "chronicle::local_ai_setup", "removing EmbeddingGemma model");
+    tracing::info!(target: "chronicle::local_inference_setup", "removing EmbeddingGemma model");
     tauri::async_runtime::spawn_blocking(|| match engine_paths::embed_model() {
         Some(embed_model) => remove_file_if_exists(&embed_model),
         None => Ok(()),

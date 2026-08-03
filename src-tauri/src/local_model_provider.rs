@@ -6,7 +6,7 @@
 //! application. Both the `llama-server` binary and the GGUF model files live
 //! under `<data dir>\llama` (see `engine_paths`), where `<data dir>` is the
 //! folder the user chose on first run (see `data_directory`), and are
-//! downloaded once by `local_ai_setup`; nothing here downloads anything
+//! downloaded once by `local_inference_setup`; nothing here downloads anything
 //! itself. Both servers speak llama.cpp's OpenAI-compatible HTTP API
 //! (`/v1/chat/completions` for text and vision, `/v1/embeddings` for
 //! embeddings), so this module is a thin, stable HTTP client over that API,
@@ -24,7 +24,7 @@ use std::time::Duration;
 
 /// Where the bundled engine (binary + models) lives and what its pieces are
 /// named. A single source of truth shared by the provider (to run
-/// inference) and `local_ai_setup` (to download/remove these same files).
+/// inference) and `local_inference_setup` (to download/remove these same files).
 pub mod engine_paths {
     use std::path::PathBuf;
 
