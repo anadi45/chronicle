@@ -5,7 +5,7 @@
 //! for embeddings — rather than depending on a separately installed
 //! application. Both the `llama-server` binary and the GGUF model files live
 //! under `<data dir>\llama` (see `engine_paths`), where `<data dir>` is the
-//! folder the user chose on first run (see `app_paths`), and are
+//! folder the user chose on first run (see `data_directory`), and are
 //! downloaded once by `local_ai_setup`; nothing here downloads anything
 //! itself. Both servers speak llama.cpp's OpenAI-compatible HTTP API
 //! (`/v1/chat/completions` for text and vision, `/v1/embeddings` for
@@ -48,7 +48,7 @@ pub mod engine_paths {
     pub const EMBED_MODEL_URL: &str = "https://huggingface.co/ggml-org/embeddinggemma-300M-GGUF/resolve/main/embeddinggemma-300M-Q8_0.gguf";
 
     fn base_dir() -> PathBuf {
-        crate::app_paths::data_dir().join("llama")
+        crate::data_directory::data_dir().join("llama")
     }
     pub fn runtime_dir() -> PathBuf {
         base_dir().join("runtime")

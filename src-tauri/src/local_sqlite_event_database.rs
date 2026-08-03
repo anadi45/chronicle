@@ -94,7 +94,7 @@ pub fn open_reader_pool() -> std::result::Result<ReaderPool, r2d2::Error> {
     // its callback on an already-open handle, which is too late for
     // `sqlite3_auto_extension` to take effect on that connection.
     register_sqlite_vec_extension();
-    let manager = r2d2_sqlite::SqliteConnectionManager::file(crate::app_paths::database_file()).with_init(
+    let manager = r2d2_sqlite::SqliteConnectionManager::file(crate::data_directory::database_file()).with_init(
         |connection| {
             connection.pragma_update(None, "query_only", "ON")?;
             connection.pragma_update(None, "journal_mode", "WAL")?;
@@ -114,7 +114,7 @@ impl Database {
         // registration, so this must run before `Connection::open` — not
         // inside `from_connection`, which receives an already-open handle.
         register_sqlite_vec_extension();
-        Self::from_connection(Connection::open(crate::app_paths::database_file())?)
+        Self::from_connection(Connection::open(crate::data_directory::database_file())?)
     }
 
     fn from_connection(connection: Connection) -> Result<Self> {

@@ -10,32 +10,35 @@ function LocalAiSetupPanel(){
   const [status,setStatus]=useState<SetupStatus|null>(null);
   const [busy,setBusy]=useState<string|null>(null);
   const [progress,setProgress]=useState<number|null>(null);
-  const [log,setLog]=useState<string[]>([]);
+  const [progressLabel,setProgressLabel]=useState<string|null>(null);
+  const [progressBytes,setProgressBytes]=useState<{downloaded:number;total?:number|null}|null>(null);
   const [error,setError]=useState<string|null>(null);
   const refreshStatus=()=>invoke<SetupStatus>("local_ai_setup_status").then(setStatus).catch(()=>{});
-  const appendLog=(line:string)=>setLog(l=>[...l.slice(-199),line]);
   useEffect(()=>{
     refreshStatus();
     const progressListener=listen<DownloadProgress>("llama-setup-progress",e=>{
       const p=e.payload;
-      const sizes=p.total_bytes?` (${formatBytes(p.downloaded_bytes)} / ${formatBytes(p.total_bytes)})`:` (${formatBytes(p.downloaded_bytes)})`;
-      appendLog(`${p.label}: downloading${sizes}`);
+      setProgressLabel(p.label);
+      setProgressBytes({downloaded:p.downloaded_bytes,total:p.total_bytes});
       if(typeof p.percent==="number")setProgress(p.percent);
     });
     return()=>{progressListener.then(f=>f())};
   },[]);
   useEffect(()=>{if(setupComplete(status))return;const id=setInterval(refreshStatus,4000);return()=>clearInterval(id)},[status]);
   const run=async(action:string,task:()=>Promise<unknown>)=>{
-    setBusy(action);setError(null);setProgress(null);
-    appendLog(`— starting: ${action} —`);
-    try{await task();appendLog(`— finished: ${action} —`)}
-    catch(err){const message=String(err);setError(message);appendLog(`— failed: ${action}: ${message} —`)}
-    finally{setBusy(null);setProgress(null);await refreshStatus()}
+    setBusy(action);setError(null);setProgress(null);setProgressLabel(null);setProgressBytes(null);
+    try{await task()}
+    catch(err){setError(String(err))}
+    finally{setBusy(null);setProgress(null);setProgressLabel(null);setProgressBytes(null);await refreshStatus()}
   };
   const removeArtifact=(label:string,command:string)=>{if(confirm(`Remove ${label}? You'll need to download it again to use local AI features that depend on it.`))run(command,()=>invoke(command))};
   if(!status)return null;
   const ready=setupComplete(status);
-  const progressBar=busy&&progress!=null?<div className="setup-progress"><div className="setup-progress-fill" style={{width:`${Math.min(100,Math.max(0,progress))}%`}}/><span>{Math.round(progress)}%</span></div>:null;
+  const byteText=progressBytes?(progressBytes.total?`${formatBytes(progressBytes.downloaded)} / ${formatBytes(progressBytes.total)}`:formatBytes(progressBytes.downloaded)):null;
+  const progressBar=busy&&(progress!=null||progressLabel)?<div className="setup-progress">
+    <div className="setup-progress-track"><div className="setup-progress-fill" style={progress!=null?{width:`${Math.min(100,Math.max(0,progress))}%`}:{width:"100%"}}/></div>
+    <span>{progressLabel||"Working…"}{byteText?` — ${byteText}`:""}{progress!=null?` (${Math.round(progress)}%)`:""}</span>
+  </div>:null;
   return <div className="setup-panel">
     <h3>Local AI setup</h3>
     <p className="muted">Chronicle analyzes activity entirely on this machine via a bundled llama.cpp engine — no separate app to install, nothing leaves your computer. {ready?"Everything is set up and ready.":"Finish setup once to enable semantic search and insights."}</p>
@@ -68,8 +71,6 @@ function LocalAiSetupPanel(){
     </ul>
     {progressBar}
     {error&&<p className="banner banner-error">{error}</p>}
-    <div className="setup-log-header"><strong>Setup log</strong><button className="quiet-button" onClick={()=>setLog([])}>Clear log</button></div>
-    <pre className="setup-log">{log.length>0?log.join("\n"):"No setup activity yet."}</pre>
   </div>;
 }
 function SettingsPage({settings,capture,permission,exportData,del}:{settings:Settings|null;capture:(v:boolean)=>void;permission:(i:"mouse"|"keyboard",v:boolean)=>void;exportData:()=>void;del:()=>void}){const [excludedApps,setExcludedApps]=useState("");const [excludedPaths,setExcludedPaths]=useState("");const [watched,setWatched]=useState("");const [screenshotsEnabled,setScreenshotsEnabled]=useState(false);const [keyboardAllowlist,setKeyboardAllowlist]=useState("");useEffect(()=>{setExcludedApps(settings?.excluded_applications.join("\n")||"");setExcludedPaths(settings?.excluded_paths?.join("\n")||"");setWatched(settings?.watched_folders.join("\n")||"");setScreenshotsEnabled(settings?.screenshots_enabled||false);setKeyboardAllowlist(settings?.keyboard_text_allowlist?.join("\n")||"")},[settings]);const saveExcludedApps=async()=>{const values=excludedApps.split(/[\n,]/).map(v=>v.trim()).filter(Boolean);const next=await invoke<Settings>("set_excluded_applications",{applications:values});setExcludedApps(next.excluded_applications.join("\n"))};const saveExcludedPaths=async()=>{const values=excludedPaths.split(/[\n,]/).map(v=>v.trim()).filter(Boolean);const next=await invoke<Settings>("set_excluded_paths",{paths:values});setExcludedPaths((next.excluded_paths||[]).join("\n"))};const saveKeyboardAllowlist=async()=>{const applications=keyboardAllowlist.split(/[\n,]/).map(v=>v.trim()).filter(Boolean);const next=await invoke<Settings>("set_keyboard_text_allowlist",{applications});setKeyboardAllowlist(next.keyboard_text_allowlist.join("\n"))};const saveWatched=async()=>{const values=watched.split(/[\n,]/).map(v=>v.trim()).filter(Boolean);const next=await invoke<Settings>("set_watched_folders",{folders:values});setWatched(next.watched_folders.join("\n"))};return <section className="settings-panel"><LocalAiSetupPanel/><h2>Permissions and privacy</h2><p className="muted">Raw evidence is retained privately for processing. The main feed shows only semantic insights.</p>{settings&&<><label className="setting-row"><span><strong>Foreground application tracking</strong><small>Records active application and window titles.</small></span><input type="checkbox" checked={settings.enabled} onChange={e=>capture(e.target.checked)}/></label><label className="setting-row"><span><strong>Mouse capture</strong><small>Clicks, scrolling, and drag metadata.</small></span><input type="checkbox" checked={settings.mouse_enabled} onChange={e=>permission("mouse",e.target.checked)}/></label><label className="setting-row"><span><strong>Keyboard metadata</strong><small>Key codes only; text remains protected.</small></span><input type="checkbox" checked={settings.keyboard_enabled} onChange={e=>permission("keyboard",e.target.checked)}/></label><label className="setting-row"><span><strong>Screen capture</strong><small>Transient screenshots after meaningful events.</small></span><input type="checkbox" checked={screenshotsEnabled} onChange={async e=>{const next=await invoke<Settings>("set_screenshot_permission",{enabled:e.target.checked});setScreenshotsEnabled(next.screenshots_enabled)}}/></label><div className="exclusion-editor"><strong>Keyboard text allowlist</strong><small>Text capture remains off for every application not listed here.</small><textarea value={keyboardAllowlist} onChange={e=>setKeyboardAllowlist(e.target.value)} placeholder="code.exe\nnotes.exe"/><button className="quiet-button" onClick={saveKeyboardAllowlist}>Save keyboard allowlist</button></div><div className="exclusion-editor"><strong>Excluded applications</strong><small>One executable name per line (exact match, e.g. chrome.exe).</small><textarea value={excludedApps} onChange={e=>setExcludedApps(e.target.value)} placeholder="chrome.exe\npassword-manager.exe"/><button className="quiet-button" onClick={saveExcludedApps}>Save excluded applications</button></div><div className="exclusion-editor"><strong>Excluded paths</strong><small>One folder or path segment per line.</small><textarea value={excludedPaths} onChange={e=>setExcludedPaths(e.target.value)} placeholder="Secrets\nnode_modules"/><button className="quiet-button" onClick={saveExcludedPaths}>Save excluded paths</button></div><div className="exclusion-editor"><strong>Watched folders</strong><small>One existing folder path per line.</small><textarea value={watched} onChange={e=>setWatched(e.target.value)} placeholder="E:\\Projects\\Notes"/><button className="quiet-button" onClick={saveWatched}>Save watched folders</button></div><div className="button-row"><button className="quiet-button" onClick={exportData}>Export JSON</button><button className="quiet-button danger-button" onClick={del}>Delete all data</button></div></>}</section>}

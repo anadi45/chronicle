@@ -1,4 +1,4 @@
-mod app_paths;
+mod data_directory;
 #[allow(dead_code)]
 mod activity_capture;
 #[allow(dead_code)]
@@ -35,7 +35,7 @@ pub fn run() {
     // Resolved first (and, on a first run, asks the user to pick a folder):
     // both the sqlite database below and the llama.cpp downloads in
     // `local_ai_setup` write under this one directory.
-    let data_dir = app_paths::data_dir();
+    let data_dir = data_directory::data_dir();
     tracing::info!(path = %data_dir.display(), "using data directory");
 
     // Database open failures are recoverable: AppState::initialize() falls

@@ -6,7 +6,7 @@
 //! installed-apps list. This module downloads the `llama-server` binary
 //! (from llama.cpp's own GitHub releases) and the GGUF model files (Gemma 3
 //! for chat/vision, EmbeddingGemma for embeddings, both from their official
-//! Hugging Face repos) into `<data dir>\llama` (see `app_paths::data_dir`,
+//! Hugging Face repos) into `<data dir>\llama` (see `data_directory::data_dir`,
 //! the folder the user chose on first run), starts/stops
 //! the two local servers, and removes any of those files again on request.
 //! Every step is UI-triggered and streams real, byte-accurate progress back
