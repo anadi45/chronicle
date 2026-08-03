@@ -96,6 +96,7 @@ pub fn run() {
             tauri_application_commands::get_data_directory,
             tauri_application_commands::change_data_directory,
             local_inference_setup::local_ai_setup_status,
+            local_inference_setup::cancel_model_download,
             local_inference_setup::setup_download_chat_model,
             local_inference_setup::setup_download_embed_model,
             local_inference_setup::setup_start_engine,

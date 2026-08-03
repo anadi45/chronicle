@@ -44,6 +44,9 @@ pub struct AppState {
     /// Bounded, memory-only holding area for screenshots captured at focus
     /// change so the AI queue can analyze the frame the user actually saw.
     pub screenshot_cache: Arc<Mutex<crate::capture_writer::ScreenshotCache>>,
+    /// Set to request the in-flight model download (if any) stop at its next
+    /// checked point. Reset to `false` at the start of each new download.
+    pub download_cancel: Arc<AtomicBool>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -173,6 +176,7 @@ impl AppState {
             llama_embed_process: Mutex::new(llama_embed_process),
             startup_error,
             screenshot_cache: Arc::new(Mutex::new(crate::capture_writer::ScreenshotCache::new(32))),
+            download_cancel: Arc::new(AtomicBool::new(false)),
         }
     }
 

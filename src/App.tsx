@@ -36,6 +36,7 @@ function LocalAiSetupPanel(){
     finally{setBusy(null);setProgress(null);setProgressLabel(null);setProgressBytes(null);await refreshStatus()}
   };
   const removeArtifact=(label:string,command:string)=>{if(confirm(`Remove ${label}? You'll need to download it again to use local AI features that depend on it.`))run(command,()=>invoke(command))};
+  const cancelDownload=()=>invoke("cancel_model_download").catch(()=>{});
   if(!status)return null;
   const ready=setupComplete(status);
   const byteText=progressBytes?(progressBytes.total?`${formatBytes(progressBytes.downloaded)} / ${formatBytes(progressBytes.total)}`:formatBytes(progressBytes.downloaded)):null;
@@ -52,6 +53,7 @@ function LocalAiSetupPanel(){
         <span>Analysis model ({status.chat_model_name})</span>
         <span className="button-row">
           {!status.chat_model_installed&&<button className="quiet-button" disabled={!!busy||!dataDirConfigured} onClick={()=>run("setup_download_chat_model",()=>invoke("setup_download_chat_model"))}>{busy==="setup_download_chat_model"?"Downloading…":"Download"}</button>}
+          {busy==="setup_download_chat_model"&&<button className="quiet-button danger-button" onClick={cancelDownload}>Cancel</button>}
           {status.chat_model_installed&&<button className="quiet-button danger-button" disabled={!!busy} onClick={()=>removeArtifact(status.chat_model_name,"setup_remove_chat_model")}>Remove</button>}
         </span>
       </li>
@@ -59,6 +61,7 @@ function LocalAiSetupPanel(){
         <span>Embedding model ({status.embed_model_name})</span>
         <span className="button-row">
           {!status.embed_model_installed&&<button className="quiet-button" disabled={!!busy||!dataDirConfigured} onClick={()=>run("setup_download_embed_model",()=>invoke("setup_download_embed_model"))}>{busy==="setup_download_embed_model"?"Downloading…":"Download"}</button>}
+          {busy==="setup_download_embed_model"&&<button className="quiet-button danger-button" onClick={cancelDownload}>Cancel</button>}
           {status.embed_model_installed&&<button className="quiet-button danger-button" disabled={!!busy} onClick={()=>removeArtifact(status.embed_model_name,"setup_remove_embed_model")}>Remove</button>}
         </span>
       </li>

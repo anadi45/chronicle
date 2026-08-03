@@ -23,6 +23,7 @@ use crate::tauri_application_commands::AppState;
 use serde::Serialize;
 use std::io::{Read, Write};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, State};
 
@@ -103,7 +104,18 @@ fn emit_download_progress(
 /// progress from the response's `Content-Length` header. Writes to a
 /// `.part` sibling file and renames on success, so a failed/cancelled
 /// download never leaves a file that looks complete but isn't.
-fn download_with_progress(app: &AppHandle, label: &str, url: &str, dest: &Path) -> Result<(), String> {
+///
+/// Checks `cancel` after every chunk (at most 64KiB of latency, not one long
+/// unresponsive read) and, if set, stops and deletes the partial `.part`
+/// file rather than leaving a truncated download that looks resumable but
+/// isn't — the next attempt starts clean from byte zero.
+fn download_with_progress(
+    app: &AppHandle,
+    label: &str,
+    url: &str,
+    dest: &Path,
+    cancel: &AtomicBool,
+) -> Result<(), String> {
     tracing::info!(target: "chronicle::local_inference_setup", "downloading {label} from {url}");
     let response = shared_agent()
         .get(url)
@@ -126,6 +138,11 @@ fn download_with_progress(app: &AppHandle, label: &str, url: &str, dest: &Path) 
     let mut downloaded: u64 = 0;
     let mut last_emit = Instant::now() - Duration::from_secs(1);
     loop {
+        if cancel.load(Ordering::Relaxed) {
+            drop(file);
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err(format!("{label} download was cancelled"));
+        }
         let read = reader
             .read(&mut buffer)
             .map_err(|error| format!("download of {label} was interrupted: {error}"))?;
@@ -148,16 +165,27 @@ fn download_with_progress(app: &AppHandle, label: &str, url: &str, dest: &Path) 
 const NO_DATA_DIRECTORY_ERROR: &str =
     "Choose a data directory in Settings before downloading local AI models.";
 
+/// Requests the in-flight model download, if any, stop as soon as it next
+/// checks (see `download_with_progress`) — cooperative, not instantaneous,
+/// since the underlying HTTP read can't be interrupted mid-syscall.
+#[tauri::command]
+pub fn cancel_model_download(state: State<'_, AppState>) -> Result<(), String> {
+    state.download_cancel.store(true, Ordering::Relaxed);
+    Ok(())
+}
+
 /// Downloads the Gemma 3 chat/vision model and its multimodal projector.
 #[tauri::command]
-pub async fn setup_download_chat_model(app: AppHandle) -> Result<(), String> {
+pub async fn setup_download_chat_model(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    state.download_cancel.store(false, Ordering::Relaxed);
+    let cancel = state.download_cancel.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let (Some(chat_model), Some(mmproj)) = (engine_paths::chat_model(), engine_paths::mmproj())
         else {
             return Err(NO_DATA_DIRECTORY_ERROR.to_string());
         };
-        download_with_progress(&app, "Gemma 3 chat model", engine_paths::CHAT_MODEL_URL, &chat_model)?;
-        download_with_progress(&app, "Gemma 3 vision projector", engine_paths::MMPROJ_URL, &mmproj)
+        download_with_progress(&app, "Gemma 3 chat model", engine_paths::CHAT_MODEL_URL, &chat_model, &cancel)?;
+        download_with_progress(&app, "Gemma 3 vision projector", engine_paths::MMPROJ_URL, &mmproj, &cancel)
     })
     .await
     .map_err(|error| error.to_string())?
@@ -165,12 +193,14 @@ pub async fn setup_download_chat_model(app: AppHandle) -> Result<(), String> {
 
 /// Downloads the EmbeddingGemma model.
 #[tauri::command]
-pub async fn setup_download_embed_model(app: AppHandle) -> Result<(), String> {
+pub async fn setup_download_embed_model(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    state.download_cancel.store(false, Ordering::Relaxed);
+    let cancel = state.download_cancel.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let Some(embed_model) = engine_paths::embed_model() else {
             return Err(NO_DATA_DIRECTORY_ERROR.to_string());
         };
-        download_with_progress(&app, "EmbeddingGemma model", engine_paths::EMBED_MODEL_URL, &embed_model)
+        download_with_progress(&app, "EmbeddingGemma model", engine_paths::EMBED_MODEL_URL, &embed_model, &cancel)
     })
     .await
     .map_err(|error| error.to_string())?
