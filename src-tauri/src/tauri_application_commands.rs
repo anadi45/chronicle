@@ -22,7 +22,7 @@ use std::sync::{
     Arc,
 };
 use std::thread::JoinHandle;
-use tauri::State;
+use tauri::{Emitter, State};
 
 pub struct AppState {
     pub database: Arc<Mutex<Database>>,
@@ -849,6 +849,13 @@ pub fn get_data_directory() -> String {
     crate::data_directory::data_dir().display().to_string()
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct DataDirectoryMoveProgress {
+    pub copied_bytes: u64,
+    pub total_bytes: u64,
+    pub percent: f32,
+}
+
 /// Moves Chronicle's data to a new, user-chosen directory and relaunches the
 /// app so it opens fresh against the new location.
 ///
@@ -870,12 +877,32 @@ pub async fn change_data_directory(
     if let Ok(database) = state.database.lock() {
         let _ = database.checkpoint_wal();
     }
+    let progress_app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let chosen = rfd::FileDialog::new()
             .set_title("Choose a new folder for Chronicle to store its data and downloaded models")
             .pick_folder()
             .ok_or_else(|| "no folder was chosen".to_string())?;
-        crate::data_directory::relocate(&chosen)
+        let mut last_emit = std::time::Instant::now() - std::time::Duration::from_secs(1);
+        crate::data_directory::relocate(&chosen, move |copied, total| {
+            if last_emit.elapsed() < std::time::Duration::from_millis(200) && copied < total {
+                return;
+            }
+            last_emit = std::time::Instant::now();
+            let percent = if total > 0 {
+                (copied as f64 / total as f64 * 100.0) as f32
+            } else {
+                100.0
+            };
+            let _ = progress_app.emit(
+                "data-directory-move-progress",
+                DataDirectoryMoveProgress {
+                    copied_bytes: copied,
+                    total_bytes: total,
+                    percent,
+                },
+            );
+        })
     })
     .await
     .map_err(|error| error.to_string())??;

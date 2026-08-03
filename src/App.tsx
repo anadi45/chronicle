@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-type SemanticEvent={id:string;raw_event_id:string;timestamp_ns:number;app_name?:string;window_title?:string;category:string;summary:string;confidence:number;model_name:string;created_at:string}; type RawEvent={id:string;timestamp_ns:number;event_type:string;source:string;app_name?:string;window_title?:string;text?:string;metadata_json:string;privacy_class:string;confidence:number;created_at:string}; type Overview={event:RawEvent;processing:Array<{task_type:string;status:string;attempts:number;error?:string}>;semantic_ready:boolean;embedding_ready:boolean}; type Settings={enabled:boolean;mouse_enabled:boolean;keyboard_enabled:boolean;screenshots_enabled:boolean;keyboard_text_allowlist:string[];excluded_applications:string[];excluded_paths:string[];watched_folders:string[]}; type Queue={pending:number;processing:number;complete:number;failed:number;cancelled:number}; type SetupStatus={runtime_installed:boolean;chat_model_installed:boolean;embed_model_installed:boolean;chat_running:boolean;embed_running:boolean;chat_model_name:string;embed_model_name:string}; type DownloadProgress={label:string;downloaded_bytes:number;total_bytes?:number|null;percent?:number|null};
+type SemanticEvent={id:string;raw_event_id:string;timestamp_ns:number;app_name?:string;window_title?:string;category:string;summary:string;confidence:number;model_name:string;created_at:string}; type RawEvent={id:string;timestamp_ns:number;event_type:string;source:string;app_name?:string;window_title?:string;text?:string;metadata_json:string;privacy_class:string;confidence:number;created_at:string}; type Overview={event:RawEvent;processing:Array<{task_type:string;status:string;attempts:number;error?:string}>;semantic_ready:boolean;embedding_ready:boolean}; type Settings={enabled:boolean;mouse_enabled:boolean;keyboard_enabled:boolean;screenshots_enabled:boolean;keyboard_text_allowlist:string[];excluded_applications:string[];excluded_paths:string[];watched_folders:string[]}; type Queue={pending:number;processing:number;complete:number;failed:number;cancelled:number}; type SetupStatus={runtime_installed:boolean;chat_model_installed:boolean;embed_model_installed:boolean;chat_running:boolean;embed_running:boolean;chat_model_name:string;embed_model_name:string}; type DownloadProgress={label:string;downloaded_bytes:number;total_bytes?:number|null;percent?:number|null}; type MoveProgress={copied_bytes:number;total_bytes:number;percent:number};
 const setupComplete=(s:SetupStatus|null)=>!!s&&s.runtime_installed&&s.chat_model_installed&&s.embed_model_installed&&s.chat_running&&s.embed_running;
 const formatBytes=(bytes:number)=>{if(!bytes)return"0 B";const units=["B","KB","MB","GB","TB"];const exp=Math.min(Math.floor(Math.log2(bytes)/10),units.length-1);return`${(bytes/2**(10*exp)).toFixed(exp?1:0)} ${units[exp]}`};
 const time=(n:number)=>new Date(n/1e6).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}); const insights=(q?:string)=>invoke<SemanticEvent[]>("list_semantic_events",{limit:100,query:q||null}).catch(()=>[]); const raw=()=>invoke<Overview[]>("list_raw_event_processing_overview",{limit:100}).catch(()=>[]);
@@ -69,18 +69,29 @@ function LocalAiSetupPanel(){
 function DataDirectoryPanel(){
   const [path,setPath]=useState<string|null>(null);
   const [busy,setBusy]=useState(false);
+  const [moveProgress,setMoveProgress]=useState<MoveProgress|null>(null);
   const [error,setError]=useState<string|null>(null);
   useEffect(()=>{invoke<string>("get_data_directory").then(setPath).catch(()=>{})},[]);
+  useEffect(()=>{
+    const progressListener=listen<MoveProgress>("data-directory-move-progress",e=>setMoveProgress(e.payload));
+    return()=>{progressListener.then(f=>f())};
+  },[]);
   const change=async()=>{
-    if(!confirm("Chronicle will move all of its data to the folder you choose next, then restart. Continue?"))return;
-    setBusy(true);setError(null);
+    if(!confirm("Chronicle will check the chosen folder has enough free space, move all of its data there, then restart. Continue?"))return;
+    setBusy(true);setError(null);setMoveProgress(null);
     try{await invoke("change_data_directory")}
-    catch(err){setError(String(err));setBusy(false)}
+    catch(err){setError(String(err));setBusy(false);setMoveProgress(null)}
   };
+  const moveProgressBar=busy&&moveProgress?<div className="setup-progress">
+    <div className="setup-progress-track"><div className="setup-progress-fill" style={{width:`${Math.min(100,Math.max(0,moveProgress.percent))}%`}}/></div>
+    <span>Moving data — {formatBytes(moveProgress.copied_bytes)} / {formatBytes(moveProgress.total_bytes)} ({Math.round(moveProgress.percent)}%)</span>
+  </div>:null;
   return <div className="setup-panel">
     <h3>Data directory</h3>
     <p className="muted">Everything Chronicle stores — the event database and downloaded models — lives in this folder.</p>
-    <p className="setting-row"><span><strong>Current location</strong><small>{path||"Loading…"}</small></span><button className="quiet-button" disabled={busy} onClick={change}>{busy?"Moving… restarting shortly":"Change directory…"}</button></p>
+    <p className="setting-row"><span><strong>Current location</strong><small>{path||"Loading…"}</small></span><button className="quiet-button" disabled={busy} onClick={change}>{busy?"Moving data…":"Change directory…"}</button></p>
+    {moveProgressBar}
+    {busy&&!moveProgress&&<p className="muted">Checking free space and preparing the move…</p>}
     {error&&<p className="banner banner-error">{error}</p>}
   </div>;
 }
