@@ -6,7 +6,8 @@
 
 use crate::activity_capture::CaptureSettings;
 use crate::asynchronous_processing_queue::{
-    run_processing_worker, LocalModelQueueProcessor, MAX_PENDING_TASKS, MAX_RETRY_ATTEMPTS,
+    run_processing_worker_with_metrics, LocalModelQueueProcessor, ProcessingMetrics, MAX_PENDING_TASKS,
+    MAX_RETRY_ATTEMPTS,
 };
 use crate::local_model_provider::{LlamaCppProvider, LocalModelStatus};
 use crate::local_sqlite_event_database::{
@@ -47,6 +48,12 @@ pub struct AppState {
     /// Set to request the in-flight model download (if any) stop at its next
     /// checked point. Reset to `false` at the start of each new download.
     pub download_cancel: Arc<AtomicBool>,
+    /// Throughput/latency/failure counters for the AI processing worker,
+    /// updated live as it runs. Surfaced to the UI via `processing_metrics`
+    /// so pipeline health (is it keeping up, is it failing, how slow is
+    /// each batch) is observable instead of only inferable from queue
+    /// counts after the fact.
+    pub processing_metrics: Arc<Mutex<ProcessingMetrics>>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -177,6 +184,7 @@ impl AppState {
             startup_error,
             screenshot_cache: Arc::new(Mutex::new(crate::capture_writer::ScreenshotCache::new(32))),
             download_cancel: Arc::new(AtomicBool::new(false)),
+            processing_metrics: Arc::new(Mutex::new(ProcessingMetrics::default())),
         }
     }
 
@@ -597,13 +605,17 @@ pub fn start_capture_state(state: &AppState) -> Result<(), String> {
         .lock()
         .map_err(|_| "capture thread lock poisoned".to_owned())?;
     threads.push(thread);
-    threads.push(run_processing_worker(
+    if let Ok(mut metrics) = state.processing_metrics.lock() {
+        metrics.reset();
+    }
+    threads.push(run_processing_worker_with_metrics(
         state.database.clone(),
         stop.clone(),
         Arc::new(LocalModelQueueProcessor {
             database: state.database.clone(),
             screenshot_cache: state.screenshot_cache.clone(),
         }),
+        state.processing_metrics.clone(),
     ));
     threads.push(crate::filesystem_activity_capture::start_filesystem_loop(
         state.database.clone(),
@@ -691,6 +703,37 @@ pub async fn processing_queue_status(
 ) -> Result<ProcessingQueueStatus, String> {
     let counts = state.read_with(|connection| queue_counts_on(connection)).await?;
     Ok(to_queue_status(counts))
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ProcessingMetricsView {
+    pub completed: u64,
+    pub failed: u64,
+    pub panicked: u64,
+    pub average_latency_ms: Option<f64>,
+    pub last_model_name: Option<String>,
+    pub last_model_version: Option<String>,
+}
+
+/// Live throughput/latency/failure counters for the AI processing worker —
+/// the "is the pipeline actually keeping up" view that queue counts alone
+/// can't answer (a growing `pending` count could mean the worker is idle,
+/// crashing, or just slow; this distinguishes them).
+#[tauri::command]
+pub fn processing_metrics(state: State<'_, AppState>) -> Result<ProcessingMetricsView, String> {
+    let metrics = state
+        .processing_metrics
+        .lock()
+        .map_err(|_| "processing metrics lock poisoned".to_owned())?
+        .snapshot();
+    Ok(ProcessingMetricsView {
+        completed: metrics.completed,
+        failed: metrics.failed,
+        panicked: metrics.panicked,
+        average_latency_ms: metrics.average_latency_ms(),
+        last_model_name: metrics.last_model_name,
+        last_model_version: metrics.last_model_version,
+    })
 }
 
 #[tauri::command]

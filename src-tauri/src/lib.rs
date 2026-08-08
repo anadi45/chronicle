@@ -85,6 +85,7 @@ pub fn run() {
             tauri_application_commands::set_excluded_paths,
             tauri_application_commands::set_watched_folders,
             tauri_application_commands::processing_queue_status,
+            tauri_application_commands::processing_metrics,
             tauri_application_commands::storage_usage,
             tauri_application_commands::model_provider_status,
             tauri_application_commands::processing_queue_limits,

@@ -17,10 +17,127 @@ use crate::local_semantic_processing::{
     parse_and_validate_model_json, validate_image_input, LocalSemanticAnalyzer, SemanticModelOutput,
 };
 use serde::{Deserialize, Serialize};
+use std::fs::File;
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::OnceLock;
 use std::time::Duration;
+
+/// Context window size (in tokens) both bundled servers are started with.
+/// `analyze_text_batch` concatenates up to `MAX_MODEL_BATCH_SIZE` event
+/// contexts plus `analyze_image`'s base64-embedded screenshots into a single
+/// prompt; llama.cpp's own default context (often 4096 or the model's
+/// training context) is not reliably large enough for that, and a prompt
+/// that overflows it is rejected outright rather than truncated.
+const SERVER_CONTEXT_SIZE: u32 = 8192;
+
+/// Upper bound on generated tokens per chat/vision request. Without this,
+/// `n_predict` defaults to `-1` (generate until end-of-sequence or the
+/// context fills), so a single request the model can't naturally terminate
+/// — a common failure mode for small quantized models asked for strict JSON
+/// — pins one of the server's slots and the calling worker thread for as
+/// long as the whole remaining context takes to fill. Capping it bounds
+/// worst-case per-task latency, which is what keeps the queue moving under
+/// load rather than stalling behind one bad generation. The structured
+/// output this provider asks for (category/summary/entities/relationships/
+/// confidence, optionally for up to `MAX_MODEL_BATCH_SIZE` items) fits well
+/// inside this budget.
+const MAX_RESPONSE_TOKENS: u32 = 1024;
+
+/// Opens (creating/truncating) a log file under `<data dir>\llama\logs` for a
+/// spawned server's stdout/stderr. Both streams were previously discarded
+/// (`Stdio::null()`), which made every startup and inference failure from
+/// `llama-server.exe` invisible — the process stays up and its port stays
+/// reachable even when, for example, it can't apply the model's chat
+/// template, so `chat_reachable()` reports healthy while every real request
+/// fails. Logging to a file makes that diagnosable without changing the
+/// "pending, not failed" behavior when the engine isn't installed yet.
+/// Returns one `Stdio` per stream (stdout, stderr), both appending to the
+/// same log file, so interleaved output stays in one place per server.
+fn open_server_log(name: &str) -> (Stdio, Stdio) {
+    let Some(path) = server_log_path(name) else {
+        return (Stdio::null(), Stdio::null());
+    };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    match File::create(&path).and_then(|file| Ok((file.try_clone()?, file))) {
+        Ok((out, err)) => (Stdio::from(out), Stdio::from(err)),
+        Err(_) => (Stdio::null(), Stdio::null()),
+    }
+}
+
+/// Builds the argument list for the chat/vision `llama-server`, factored out
+/// so the exact flags can be asserted on in tests without spawning a real
+/// process. `--jinja` enables llama.cpp's Jinja chat-template engine, which
+/// Gemma 3's chat template requires — without it, `/v1/chat/completions`
+/// fails (empty/unsupported template) even though the server process stays
+/// up and the port stays reachable, which is what made this failure
+/// invisible before. `-c` raises the context window past llama.cpp's
+/// default so a batched multi-event prompt (see `analyze_text_batch`) or an
+/// embedded screenshot doesn't get rejected for overflowing it.
+fn chat_server_args(chat_model: &Path, mmproj: &Path, host: &str, port: u16) -> Vec<String> {
+    vec![
+        "-m".into(),
+        chat_model.to_string_lossy().into_owned(),
+        "--mmproj".into(),
+        mmproj.to_string_lossy().into_owned(),
+        "--host".into(),
+        host.into(),
+        "--port".into(),
+        port.to_string(),
+        "--jinja".into(),
+        "-c".into(),
+        SERVER_CONTEXT_SIZE.to_string(),
+        "-t".into(),
+        inference_thread_count().to_string(),
+    ]
+}
+
+/// Threads llama.cpp is told to use for generation. llama.cpp's own default
+/// (`-1`) already resolves to the host's core count, but pinning it
+/// explicitly makes the number visible/tunable here instead of buried in
+/// the engine's own heuristics, and avoids over-subscribing on hybrid
+/// (performance + efficiency core) CPUs where llama.cpp's auto-detection is
+/// not always the count you'd actually pick. One core is held back for the
+/// rest of Chronicle (capture hooks, the Tauri UI thread, SQLite) so local
+/// inference never fully starves the app it's running inside.
+fn inference_thread_count() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get().saturating_sub(1).max(1))
+        .unwrap_or(4)
+}
+
+/// Builds the argument list for the embedding `llama-server`. See
+/// `chat_server_args` for why `--jinja` and `-c` are present; `--jinja` is
+/// harmless for a pure-embedding model but keeps the two spawn paths
+/// consistent, and `-c` matters here too since `embed_batch` sends one
+/// request per batch of inputs.
+fn embed_server_args(embed_model: &Path, host: &str, port: u16) -> Vec<String> {
+    vec![
+        "-m".into(),
+        embed_model.to_string_lossy().into_owned(),
+        "--host".into(),
+        host.into(),
+        "--port".into(),
+        port.to_string(),
+        "--embeddings".into(),
+        "-c".into(),
+        SERVER_CONTEXT_SIZE.to_string(),
+        "-t".into(),
+        inference_thread_count().to_string(),
+    ]
+}
+
+fn server_log_path(name: &str) -> Option<PathBuf> {
+    Some(
+        crate::data_directory::current()?
+            .join("llama")
+            .join("logs")
+            .join(format!("{name}.log")),
+    )
+}
 
 /// Where the bundled engine (binary + models) lives and what its pieces are
 /// named. A single source of truth shared by the provider (to run
@@ -228,17 +345,11 @@ impl LlamaCppProvider {
         else {
             return Ok(None);
         };
+        let (out, err) = open_server_log("chat-server");
         Command::new(engine_paths::server_binary())
-            .arg("-m")
-            .arg(chat_model)
-            .arg("--mmproj")
-            .arg(mmproj)
-            .arg("--host")
-            .arg(&self.host)
-            .arg("--port")
-            .arg(self.chat_port.to_string())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .args(chat_server_args(&chat_model, &mmproj, &self.host, self.chat_port))
+            .stdout(out)
+            .stderr(err)
             .spawn()
             .map(Some)
             .map_err(|error| format!("unable to start the chat/vision engine: {error}"))
@@ -257,16 +368,11 @@ impl LlamaCppProvider {
         let Some(embed_model) = engine_paths::embed_model() else {
             return Ok(None);
         };
+        let (out, err) = open_server_log("embed-server");
         Command::new(engine_paths::server_binary())
-            .arg("-m")
-            .arg(embed_model)
-            .arg("--host")
-            .arg(&self.host)
-            .arg("--port")
-            .arg(self.embed_port.to_string())
-            .arg("--embeddings")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .args(embed_server_args(&embed_model, &self.host, self.embed_port))
+            .stdout(out)
+            .stderr(err)
             .spawn()
             .map(Some)
             .map_err(|error| format!("unable to start the embedding engine: {error}"))
@@ -310,7 +416,8 @@ impl LlamaCppProvider {
         let body = serde_json::json!({
             "messages": [{"role": "user", "content": prompt}],
             "response_format": {"type": "json_object"},
-            "temperature": 0.2
+            "temperature": 0.2,
+            "max_tokens": MAX_RESPONSE_TOKENS
         });
         let content = self.chat_completion(&body)?;
         parse_and_validate_model_json(&content)
@@ -339,7 +446,8 @@ impl LlamaCppProvider {
         let body = serde_json::json!({
             "messages": [{"role": "user", "content": prompt}],
             "response_format": {"type": "json_object"},
-            "temperature": 0.2
+            "temperature": 0.2,
+            "max_tokens": MAX_RESPONSE_TOKENS.saturating_mul(inputs.len() as u32)
         });
         let content = self.chat_completion(&body)?;
         let response: BatchSemanticResponse = serde_json::from_str(&content)
@@ -378,7 +486,8 @@ impl LlamaCppProvider {
                 ]
             }],
             "response_format": {"type": "json_object"},
-            "temperature": 0.2
+            "temperature": 0.2,
+            "max_tokens": MAX_RESPONSE_TOKENS
         });
         let content = self.chat_completion(&body)?;
         parse_and_validate_model_json(&content)
@@ -466,11 +575,89 @@ fn base64_encode(bytes: &[u8]) -> String {
     }
     output
 }
+/// `LlamaCppProvider::default()` reads `CHRONICLE_LLAMA_*` env vars, which
+/// are process-global. Tests that set them (to point the provider at a mock
+/// server) and tests that assert on the unset defaults would otherwise race
+/// when `cargo test` runs them on different threads of the same process.
+/// This lock — shared with `asynchronous_processing_queue`'s end-to-end test
+/// — makes any such env-var-touching test mutually exclusive.
+#[cfg(test)]
+pub(crate) fn env_var_lock() -> &'static std::sync::Mutex<()> {
+    static LOCK: OnceLock<std::sync::Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+}
+
+/// A one-shot HTTP server standing in for one `llama-server.exe` endpoint:
+/// accepts a single connection, reads the request (headers + body via
+/// Content-Length), hands the request body to `on_request`, and writes back
+/// whatever body it returns as a 200 JSON response. Shared by this module's
+/// own HTTP-client tests and by `asynchronous_processing_queue`'s full
+/// capture-to-database pipeline test, so both can drive `LlamaCppProvider`
+/// exactly as it would a real `llama-server` instance without needing the
+/// multi-gigabyte model download this pipeline ultimately depends on.
+#[cfg(test)]
+pub(crate) fn mock_http_server(
+    on_request: impl Fn(String) -> String + Send + 'static,
+) -> (u16, std::thread::JoinHandle<()>) {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
+    let addr = listener.local_addr().expect("local addr");
+    let handle = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept connection");
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 4096];
+        let mut content_length = None;
+        loop {
+            let n = stream.read(&mut chunk).expect("read request");
+            buf.extend_from_slice(&chunk[..n]);
+            let text = String::from_utf8_lossy(&buf);
+            if let Some(header_end) = text.find("\r\n\r\n") {
+                if content_length.is_none() {
+                    content_length = text
+                        .lines()
+                        .find_map(|line| {
+                            line.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .map(|v| v.trim().to_string())
+                        })
+                        .and_then(|v| v.parse::<usize>().ok());
+                }
+                let body_len = buf.len() - (header_end + 4);
+                if let Some(expected) = content_length {
+                    if body_len >= expected {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+            if n == 0 {
+                break;
+            }
+        }
+        let text = String::from_utf8_lossy(&buf).into_owned();
+        let header_end = text.find("\r\n\r\n").map(|i| i + 4).unwrap_or(text.len());
+        let request_body = text[header_end..].to_string();
+        let response_body = on_request(request_body);
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            response_body.len(),
+            response_body
+        );
+        stream.write_all(response.as_bytes()).expect("write response");
+        stream.flush().ok();
+    });
+    (addr.port(), handle)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn defaults_use_local_engine_ports() {
+        let _guard = env_var_lock().lock().unwrap();
         let p = LlamaCppProvider::default();
         assert_eq!(p.host, "127.0.0.1");
         assert!(p.chat_port > 0);
@@ -478,5 +665,181 @@ mod tests {
         assert_ne!(p.chat_port, p.embed_port);
         assert!(!p.chat_model.is_empty());
         assert!(!p.embedding_model.is_empty());
+    }
+
+    #[test]
+    fn chat_server_args_enable_jinja_and_wide_context() {
+        let args = chat_server_args(
+            Path::new("model.gguf"),
+            Path::new("mmproj.gguf"),
+            "127.0.0.1",
+            8090,
+        );
+        assert!(
+            args.contains(&"--jinja".to_string()),
+            "chat server must run with --jinja so Gemma 3's chat template is applied; \
+             without it /v1/chat/completions fails while the port stays reachable, \
+             which is exactly the silent-failure mode reported: {args:?}"
+        );
+        let ctx_index = args.iter().position(|a| a == "-c").expect("-c flag present");
+        assert_eq!(args[ctx_index + 1], SERVER_CONTEXT_SIZE.to_string());
+    }
+
+    #[test]
+    fn embed_server_args_include_wide_context() {
+        let args = embed_server_args(Path::new("embed.gguf"), "127.0.0.1", 8091);
+        assert!(args.contains(&"--embeddings".to_string()));
+        let ctx_index = args.iter().position(|a| a == "-c").expect("-c flag present");
+        assert_eq!(args[ctx_index + 1], SERVER_CONTEXT_SIZE.to_string());
+    }
+
+    #[test]
+    fn server_args_pin_an_explicit_thread_count() {
+        let expected = inference_thread_count().to_string();
+        let chat_args = chat_server_args(Path::new("m.gguf"), Path::new("mm.gguf"), "127.0.0.1", 8090);
+        let chat_index = chat_args.iter().position(|a| a == "-t").expect("-t flag present");
+        assert_eq!(chat_args[chat_index + 1], expected);
+
+        let embed_args = embed_server_args(Path::new("e.gguf"), "127.0.0.1", 8091);
+        let embed_index = embed_args.iter().position(|a| a == "-t").expect("-t flag present");
+        assert_eq!(embed_args[embed_index + 1], expected);
+    }
+
+    #[test]
+    fn inference_thread_count_leaves_a_core_for_the_rest_of_the_app() {
+        let available = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+        let threads = inference_thread_count();
+        assert!(threads >= 1);
+        if available > 1 {
+            assert_eq!(threads, available - 1);
+        } else {
+            assert_eq!(threads, 1);
+        }
+    }
+
+    fn provider_for(port: u16) -> LlamaCppProvider {
+        LlamaCppProvider {
+            host: "127.0.0.1".into(),
+            chat_port: port,
+            embed_port: port,
+            chat_model: "test-chat".into(),
+            embedding_model: "test-embed".into(),
+        }
+    }
+
+    #[test]
+    fn analyze_text_bounds_generation_with_max_tokens() {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let (port, handle) = mock_http_server(move |request| {
+            sender.send(request).unwrap();
+            let content = serde_json::json!({
+                "category": "coding",
+                "summary": "s",
+                "entities": [],
+                "relationships": [],
+                "confidence": 0.5
+            })
+            .to_string();
+            serde_json::json!({"choices": [{"message": {"content": content}}]}).to_string()
+        });
+        let provider = provider_for(port);
+        provider.analyze_text("hello").expect("analyze_text should succeed");
+        handle.join().unwrap();
+        let request: serde_json::Value = serde_json::from_str(&receiver.recv().unwrap()).unwrap();
+        let max_tokens = request["max_tokens"]
+            .as_u64()
+            .expect("request must bound generation with max_tokens, or a bad generation can pin a worker thread indefinitely");
+        assert_eq!(max_tokens, MAX_RESPONSE_TOKENS as u64);
+    }
+
+    #[test]
+    fn analyze_text_parses_llama_server_chat_response() {
+        let (port, handle) = mock_http_server(|_request| {
+            let content = serde_json::json!({
+                "category": "coding",
+                "summary": "Editing Rust source",
+                "entities": ["chronicle"],
+                "relationships": [],
+                "confidence": 0.9
+            })
+            .to_string();
+            serde_json::json!({"choices": [{"message": {"content": content}}]}).to_string()
+        });
+        let provider = provider_for(port);
+        let result = provider.analyze_text("editing a rust file").expect("analyze_text should succeed");
+        assert_eq!(result.category, "coding");
+        assert_eq!(result.summary, "Editing Rust source");
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn analyze_text_batch_reorders_by_response_index() {
+        let (port, handle) = mock_http_server(|_request| {
+            let content = serde_json::json!({
+                "results": [
+                    {"index": 1, "category": "b", "summary": "second", "entities": [], "relationships": [], "confidence": 0.5},
+                    {"index": 0, "category": "a", "summary": "first", "entities": [], "relationships": [], "confidence": 0.5}
+                ]
+            })
+            .to_string();
+            serde_json::json!({"choices": [{"message": {"content": content}}]}).to_string()
+        });
+        let provider = provider_for(port);
+        let results = provider
+            .analyze_text_batch(&["first input".into(), "second input".into()])
+            .expect("batch should succeed");
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].summary, "first");
+        assert_eq!(results[1].summary, "second");
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn analyze_text_batch_rejects_mismatched_result_count() {
+        let (port, handle) = mock_http_server(|_request| {
+            let content = serde_json::json!({
+                "results": [
+                    {"index": 0, "category": "a", "summary": "only one", "entities": [], "relationships": [], "confidence": 0.5}
+                ]
+            })
+            .to_string();
+            serde_json::json!({"choices": [{"message": {"content": content}}]}).to_string()
+        });
+        let provider = provider_for(port);
+        let err = provider
+            .analyze_text_batch(&["first".into(), "second".into()])
+            .expect_err("count mismatch must error, not silently misassign results");
+        assert!(err.contains("count mismatch"));
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn embed_batch_parses_llama_server_embeddings_response() {
+        let (port, handle) = mock_http_server(|_request| {
+            serde_json::json!({
+                "data": [
+                    {"index": 1, "embedding": [0.4, 0.5]},
+                    {"index": 0, "embedding": [0.1, 0.2]}
+                ]
+            })
+            .to_string()
+        });
+        let provider = provider_for(port);
+        let results = provider
+            .embed_batch(&["first".into(), "second".into()])
+            .expect("embed_batch should succeed");
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0], vec![0.1, 0.2]);
+        assert_eq!(results[1], vec![0.4, 0.5]);
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn chat_completion_surfaces_engine_errors_instead_of_panicking() {
+        let provider = provider_for(1);
+        let err = provider
+            .analyze_text("anything")
+            .expect_err("unreachable port must error, not panic");
+        assert!(err.contains("unavailable") || err.contains("engine"));
     }
 }

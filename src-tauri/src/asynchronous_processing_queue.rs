@@ -304,6 +304,22 @@ pub fn run_processing_worker(
     stop: Arc<AtomicBool>,
     processor: Arc<dyn QueueTaskProcessor>,
 ) -> thread::JoinHandle<()> {
+    run_processing_worker_with_metrics(database, stop, processor, Arc::new(Mutex::new(ProcessingMetrics::default())))
+}
+
+/// Same worker loop as `run_processing_worker`, but records throughput,
+/// failure counts, and per-batch latency into `metrics` as it goes — the
+/// only way to answer "is the pipeline actually keeping up" from outside
+/// the worker thread. `run_processing_worker` exists as a thin wrapper for
+/// callers (like most tests) that don't need to observe this; production
+/// startup (`start_capture_state`) uses this directly and hands the same
+/// `Arc<Mutex<ProcessingMetrics>>` to the `processing_metrics` Tauri command.
+pub fn run_processing_worker_with_metrics(
+    database: Arc<Mutex<Database>>,
+    stop: Arc<AtomicBool>,
+    processor: Arc<dyn QueueTaskProcessor>,
+    metrics: Arc<Mutex<ProcessingMetrics>>,
+) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         if let Ok(database) = database.lock() {
             let _ = database.recover_stale_processing_tasks(10);
@@ -343,14 +359,24 @@ pub fn run_processing_worker(
                     }
                 }
             }
+            let batch_started = std::time::Instant::now();
+            let panicked = std::cell::Cell::new(false);
             let processing_result =
-                catch_unwind(AssertUnwindSafe(|| processor.process_batch(&tasks)))
-                    .unwrap_or_else(|_| Err("processing provider panicked".into()));
+                catch_unwind(AssertUnwindSafe(|| processor.process_batch(&tasks))).unwrap_or_else(|_| {
+                    panicked.set(true);
+                    Err("processing provider panicked".into())
+                });
+            let batch_latency = batch_started.elapsed();
             match processing_result {
                 Ok(()) => {
                     if let Ok(database) = database.lock() {
                         for task in &tasks {
                             let _ = database.finish_task(&task.id);
+                        }
+                    }
+                    if let Ok(mut metrics) = metrics.lock() {
+                        for _ in &tasks {
+                            metrics.record_completed_with_latency(batch_latency);
                         }
                     }
                 }
@@ -359,6 +385,15 @@ pub fn run_processing_worker(
                         for task in &tasks {
                             let retry = task.attempts < MAX_RETRY_ATTEMPTS;
                             let _ = database.fail_task(&task.id, &error, retry, task.attempts);
+                        }
+                    }
+                    if let Ok(mut metrics) = metrics.lock() {
+                        for _ in &tasks {
+                            if panicked.get() {
+                                metrics.record_panicked();
+                            } else {
+                                metrics.record_failed();
+                            }
                         }
                     }
                     if tasks.iter().any(|task| task.attempts < MAX_RETRY_ATTEMPTS) {
@@ -511,6 +546,234 @@ mod tests {
                 .unwrap()
                 .get("complete"),
             Some(&1)
+        );
+    }
+
+    /// `run_processing_worker` (the wrapper with no metrics observer) must
+    /// still behave identically to the metrics-tracking version for callers
+    /// that don't care about metrics — this is what production startup used
+    /// before `processing_metrics` existed, and every other test in this
+    /// module still calls it, so it must keep working unchanged.
+    #[test]
+    fn metrics_are_recorded_for_both_successes_and_failures() {
+        struct FlakyProcessor {
+            fail_next: std::sync::atomic::AtomicBool,
+        }
+        impl QueueTaskProcessor for FlakyProcessor {
+            fn process(&self, _task: &QueueTask) -> Result<(), String> {
+                if self.fail_next.swap(false, Ordering::Relaxed) {
+                    Err("simulated engine failure".into())
+                } else {
+                    Ok(())
+                }
+            }
+        }
+        let database = Arc::new(Mutex::new(Database::in_memory().unwrap()));
+        // Different task types so the worker processes them in separate
+        // batches (claim_next_tasks only pulls additional work of the same
+        // type as the first-claimed task) — otherwise both would land in
+        // one process_batch call and the default `QueueTaskProcessor::
+        // process_batch` short-circuits on the first error, which would
+        // fail both tasks together instead of exercising one success and
+        // one failure independently.
+        for (id, event_id, task_type) in [
+            ("fail-task", "fail-event", TaskType::SemanticTextAnalysis),
+            ("ok-task", "ok-event", TaskType::EmbeddingGeneration),
+        ] {
+            database
+                .lock()
+                .unwrap()
+                .insert_event(&RawEvent {
+                    id: event_id.into(),
+                    timestamp_ns: 1,
+                    event_type: "test".into(),
+                    source: "test".into(),
+                    app_name: None,
+                    executable_path: None,
+                    process_id: None,
+                    window_handle: None,
+                    window_title: None,
+                    element_name: None,
+                    text: None,
+                    file_path: None,
+                    metadata_json: "{}".into(),
+                    privacy_class: "test".into(),
+                    confidence: 1.0,
+                    created_at: "2026-01-01T00:00:00Z".into(),
+                })
+                .unwrap();
+            database
+                .lock()
+                .unwrap()
+                .enqueue_task(&QueueTask {
+                    id: id.into(),
+                    raw_event_id: event_id.into(),
+                    task_type,
+                    status: QueueStatus::Pending,
+                    attempts: 0,
+                    priority: 0,
+                })
+                .unwrap();
+        }
+        let stop = Arc::new(AtomicBool::new(false));
+        let processor = Arc::new(FlakyProcessor {
+            fail_next: std::sync::atomic::AtomicBool::new(true),
+        });
+        let metrics = Arc::new(Mutex::new(ProcessingMetrics::default()));
+        let worker =
+            run_processing_worker_with_metrics(database.clone(), stop.clone(), processor, metrics.clone());
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let snapshot = metrics.lock().unwrap().snapshot();
+            if snapshot.completed >= 1 && snapshot.failed >= 1 {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "metrics were not updated in time: {snapshot:?}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        stop.store(true, Ordering::Relaxed);
+        worker.join().unwrap();
+
+        let snapshot = metrics.lock().unwrap().snapshot();
+        assert_eq!(snapshot.completed, 1, "successful task must be counted");
+        assert_eq!(snapshot.failed, 1, "failed task must be counted separately from successes");
+        assert_eq!(snapshot.panicked, 0);
+        assert!(snapshot.average_latency_ms().is_some(), "completed work must record latency");
+    }
+
+    /// Drives the real, production `LocalModelQueueProcessor` (not a test
+    /// double) through the full path a captured event actually takes:
+    /// insert raw event -> enqueue -> `run_processing_worker` claims it ->
+    /// `LlamaCppProvider` (the real HTTP client) calls a mock server standing
+    /// in for `llama-server.exe` at the exact contract boundary
+    /// (`/v1/chat/completions`, `/v1/embeddings`) -> semantic result and
+    /// embedding land back in SQLite. This is the end-to-end check for
+    /// "events aren't getting processed": every piece of Chronicle's own
+    /// code between capture and storage runs for real here, only the model
+    /// weights themselves are stubbed, since exercising real weights needs
+    /// a multi-gigabyte download this test
+    /// suite can't depend on — see `local_model_provider`'s
+    /// `chat_server_args_enable_jinja_and_wide_context` test and the
+    /// `resources/llama/llama-server.exe --jinja` manual smoke test for
+    /// coverage of the real binary/model boundary itself).
+    #[test]
+    fn full_pipeline_processes_event_end_to_end_against_mock_llama_server() {
+        use crate::local_model_provider::mock_http_server;
+
+        let _env_guard = crate::local_model_provider::env_var_lock().lock().unwrap();
+
+        let (chat_port, chat_handle) = mock_http_server(|_request| {
+            let content = serde_json::json!({
+                "category": "coding",
+                "summary": "Editing chronicle source in an IDE",
+                "entities": ["chronicle"],
+                "relationships": [],
+                "confidence": 0.87
+            })
+            .to_string();
+            serde_json::json!({"choices": [{"message": {"content": content}}]}).to_string()
+        });
+        let (embed_port, embed_handle) = mock_http_server(|_request| {
+            serde_json::json!({"data": [{"index": 0, "embedding": [0.1, 0.2, 0.3]}]}).to_string()
+        });
+
+        std::env::set_var("CHRONICLE_LLAMA_HOST", "127.0.0.1");
+        std::env::set_var("CHRONICLE_LLAMA_CHAT_PORT", chat_port.to_string());
+        std::env::set_var("CHRONICLE_LLAMA_EMBED_PORT", embed_port.to_string());
+
+        let database = Arc::new(Mutex::new(Database::in_memory().unwrap()));
+        database
+            .lock()
+            .unwrap()
+            .insert_event(&RawEvent {
+                id: "e2e-event".into(),
+                timestamp_ns: 1,
+                event_type: "window_focused".into(),
+                source: "foreground_window".into(),
+                app_name: Some("VS Code".into()),
+                executable_path: None,
+                process_id: None,
+                window_handle: None,
+                window_title: Some("local_model_provider.rs".into()),
+                element_name: None,
+                text: Some("editing the llama server integration".into()),
+                file_path: None,
+                metadata_json: "{}".into(),
+                privacy_class: "content".into(),
+                confidence: 1.0,
+                created_at: "2026-01-01T00:00:00Z".into(),
+            })
+            .unwrap();
+        database
+            .lock()
+            .unwrap()
+            .enqueue_task(&QueueTask {
+                id: "e2e-task".into(),
+                raw_event_id: "e2e-event".into(),
+                task_type: TaskType::SemanticTextAnalysis,
+                status: QueueStatus::Pending,
+                attempts: 0,
+                priority: 0,
+            })
+            .unwrap();
+
+        let processor = Arc::new(LocalModelQueueProcessor {
+            database: database.clone(),
+            screenshot_cache: Arc::new(Mutex::new(ScreenshotCache::new(16))),
+        });
+        let stop = Arc::new(AtomicBool::new(false));
+        let worker = run_processing_worker(database.clone(), stop.clone(), processor);
+
+        // Each lookup is its own statement (not chained inside the `if let`
+        // scrutinee) so its `MutexGuard` temporary drops at the semicolon
+        // instead of living for the whole `if let` body — chaining a second
+        // `.lock()` inside that body would try to lock the same `Mutex`
+        // while the first guard was still alive and deadlock immediately.
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let semantic = loop {
+            let semantic = database
+                .lock()
+                .unwrap()
+                .semantic_for_raw_event("e2e-event")
+                .unwrap();
+            let completed = database
+                .lock()
+                .unwrap()
+                .queue_counts()
+                .unwrap()
+                .get("complete")
+                .copied()
+                .unwrap_or(0);
+            if let Some(semantic) = semantic {
+                if completed >= 2 {
+                    break semantic;
+                }
+            }
+            if std::time::Instant::now() > deadline {
+                stop.store(true, Ordering::Relaxed);
+                worker.join().unwrap();
+                panic!("event was not fully processed (semantic analysis + embedding) within the deadline");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        };
+
+        stop.store(true, Ordering::Relaxed);
+        worker.join().unwrap();
+        chat_handle.join().unwrap();
+        embed_handle.join().unwrap();
+
+        std::env::remove_var("CHRONICLE_LLAMA_HOST");
+        std::env::remove_var("CHRONICLE_LLAMA_CHAT_PORT");
+        std::env::remove_var("CHRONICLE_LLAMA_EMBED_PORT");
+
+        assert_eq!(semantic.category, "coding");
+        assert_eq!(semantic.summary, "Editing chronicle source in an IDE");
+        assert_eq!(semantic.entities_json, "[\"chronicle\"]");
+
+        assert!(
+            database.lock().unwrap().embedding_exists(&semantic.id).unwrap(),
+            "embedding produced by the worker must be persisted"
         );
     }
 }
